@@ -19,6 +19,8 @@ def test_data_directories_exist() -> None:
     assert not missing, f"Data directories missing on disk: {missing}"
 
 
-def test_temporal_cut_is_contiguous() -> None:
-    # A gap would leave steps that belong to neither period and that nothing evaluates.
+def test_temporal_cut_is_fixed_and_contiguous() -> None:
+    # Contiguity guards against desynced constants; the literals against drifting from the spec.
     assert settings.PRODUCTION_FIRST_STEP == settings.REFERENCE_LAST_STEP + 1
+    assert settings.REFERENCE_LAST_STEP == 400
+    assert settings.PRODUCTION_FIRST_STEP == 401

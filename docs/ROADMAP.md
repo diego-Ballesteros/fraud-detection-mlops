@@ -273,7 +273,7 @@ fraud-detection-mlops/
 ├── app/                           ← requisito explícito (Reto 2)
 │   └── monitoring_app.py
 │
-├── reports/                       ← el Report HTML del monitoreo
+├── reports/deliverables/          ← el Report HTML del monitoreo
 ├── tests/
 └── .github/workflows/ci.yml
 ```
@@ -396,7 +396,7 @@ qué columnas pueden entrar al modelo.
 - [ ] Drift de `step >= 401` contra la referencia, feature por feature
 - [ ] Drift del target: cómo cambia la prevalencia entre periodos
 - [ ] Desempeño del modelo en producción, **por ventanas de steps** y no como un número
-- [ ] Reportes de Evidently → `reports/*.html`
+- [ ] Reportes de Evidently → `reports/deliverables/`
 - [ ] **Interpretación escrita del monitoreo:** qué features driftan, por qué, y si el
       desempeño se degrada con ellas
 - [ ] **App de Streamlit (Reto 2):** métricas calculadas sobre los artefactos, con la
@@ -443,7 +443,7 @@ qué columnas pueden entrar al modelo.
 | Monitoreo de desempeño | 30% | `monitoring/performance.py` | 4 |
 | Monitoreo de drift | 30% | `monitoring/drift.py` | 4 |
 | Interpretación del monitoreo | 30% | Notebook 04 + README | 4 |
-| Report HTML | 30% | `reports/` | 4 |
+| Report HTML | 30% | `reports/deliverables/` | 4 |
 | Documentación y docstrings | 10% | Todo el repositorio | Todas |
 | **Reto ML 1** — AutoML | +10% | Espacio de búsqueda multi-algoritmo | 2 |
 | **Reto ML 2** — app web | +10% | `app/monitoring_app.py` | 4 |

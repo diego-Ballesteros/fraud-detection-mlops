@@ -1,0 +1,6 @@
+# Text files are stored with LF in the index, whatever the platform's line endings.
+* text=auto
+
+# CSV data is never normalized: a silent CRLF conversion changes the bytes on disk and
+# breaks any reproducibility checksum computed on another machine.
+*.csv binary

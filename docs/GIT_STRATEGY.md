@@ -59,16 +59,7 @@ Formato: `feature/NN-nombre-en-ingles`
 - `NN` es el número de fase del roadmap, con dos dígitos.
 - El nombre va en inglés, en minúsculas y separado por guiones.
 
-Nombres canónicos, tomados de las fases de `docs/ROADMAP.md`:
-
-| Fase | Rama |
-|---|---|
-| 0 — Fundación | `feature/00-foundation` |
-| 1 — Datos y EDA | `feature/01-data-and-eda` |
-| 2 — Modelado y AutoML | `feature/02-training` |
-| 3 — Interpretabilidad | `feature/03-interpretability` |
-| 4 — Monitoreo | `feature/04-monitoring` |
-| 5 — Cierre | `feature/05-closing` |
+Los nombres canónicos de cada rama están en `docs/ROADMAP.md`, sección 9.
 
 ---
 
@@ -147,12 +138,4 @@ push.
 
 ## 9. Convención de idioma
 
-| Elemento | Idioma |
-|---|---|
-| Identificadores, funciones, clases, variables | Inglés |
-| Docstrings y comentarios en código | Inglés |
-| Nombres de archivos, carpetas, ramas, commits | Inglés |
-| Todos los documentos markdown y los notebooks | Español |
-
-Los nombres de columnas del dataset se conservan como los entrega la fuente; lo que va en
-español es su descripción.
+La convención de idioma está en `docs/METHODOLOGY.md`, sección 4.

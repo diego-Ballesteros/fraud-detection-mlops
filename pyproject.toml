@@ -4,11 +4,13 @@ version = "0.1.0"
 description = "Fraud detection on PaySim mobile transactions with hyperparameter optimization, interpretability and drift monitoring."
 readme = "README.md"
 requires-python = ">=3.11,<3.12"
+# Floors are the minimum the project needs, not the latest release on the day `uv add` ran,
+# and sit on a major version where the API matters (docs/adr/0003-dependency-bounds.md).
 dependencies = [
-    "pandas>=3.0.6",
-    "pyarrow>=26.0.0",
-    "pydantic>=2.14.1",
-    "pydantic-settings>=2.16.0",
+    "pandas>=2.2,<3",
+    "pyarrow>=16",
+    "pydantic>=2.3",
+    "pydantic-settings>=2.2",
 ]
 
 [build-system]
@@ -18,11 +20,20 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/fraud_detection"]
 
+# --- uv ----------------------------------------------------------------------
+[tool.uv]
+# numba is not a direct dependency. Without this floor, a universal resolution backtracks
+# to numba 0.53.1, which has no cp311 wheel (docs/adr/0003-dependency-bounds.md).
+constraint-dependencies = ["numba>=0.57"]
+
 # --- Ruff --------------------------------------------------------------------
 [tool.ruff]
 line-length = 100
 target-version = "py311"
 src = ["src", "tests"]
+# Markdown is out of ruff's scope: the pre-commit hook only passes Python files, so
+# formatting .md code blocks in CI alone would let a doc pass locally and fail in CI.
+extend-exclude = ["*.md"]
 
 [tool.ruff.lint]
 select = [
@@ -65,10 +76,10 @@ addopts = ["-ra", "--strict-markers", "--cov=fraud_detection", "--cov-report=ter
 
 [dependency-groups]
 dev = [
-    "ipykernel>=7.4.0",
-    "mypy>=2.4.0",
-    "pre-commit>=4.7.0",
-    "pytest>=9.1.1",
-    "pytest-cov>=7.1.0",
-    "ruff>=0.17.1",
+    "ipykernel>=7.0",
+    "mypy>=2.0",
+    "pre-commit>=4.0",
+    "pytest>=9.0",
+    "pytest-cov>=7.0",
+    "ruff>=0.17",
 ]
