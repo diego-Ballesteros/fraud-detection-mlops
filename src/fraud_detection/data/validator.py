@@ -4,11 +4,15 @@ The validator never stops at the first problem and never repairs one: it runs ev
 check, collects all the findings, and fails once at the end with the full listing. A
 check that cannot run is reported as skipped, never as passed.
 
-Scope of the content checks. Domains and nulls are checked on the reference period
-only. The production period gets the structural checks: its rows are parsed with the
-declared types, because the CSV is a single file, and they are counted in the partition
-check. Its content is reserved for phase 4 by the temporal cut, and that skip is listed
-in the report as one more finding.
+What each period allows. The reference period gets every check, and its findings report
+counts and values. On production, everything that is a property of the RECORD is
+allowed: that the declared dtypes apply, that the columns are present and in order, that
+the values are within the declared domain, that there are no nulls where the schema
+forbids them. Everything that is a property of the PHENOMENON is forbidden: rates,
+distributions, statistics, cardinalities, correlations. Checks on production report True
+or False, never a count or a proportion. Reason: a value outside the domain in
+production makes phase 4 fail, and discovering it today costs nothing; but a count
+informs about the phenomenon, and that crosses the cut.
 """
 
 from collections import Counter
@@ -47,12 +51,20 @@ class Status(Enum):
     SKIPPED = "skipped"
 
 
+class Period(Enum):
+    """Period a content check runs on; it decides what the findings may report."""
+
+    REFERENCE = "reference"
+    PRODUCTION = "production"
+
+
 @dataclass(frozen=True)
 class Finding:
     """Outcome of one check.
 
     Attributes:
-        check: Name of the check, with the column it applies to when there is one.
+        check: Name of the check, with the period and the column it applies to when
+            there are.
         status: Whether the check passed, failed or could not run.
         severity: Whether a failure of this check is blocking.
         detail: What was found, in one line.
@@ -131,6 +143,12 @@ def _skipped(check: str, detail: str) -> Finding:
     return Finding(check, Status.SKIPPED, Severity.BLOCKING, detail)
 
 
+def _boolean(check: str, statement: str, holds: bool) -> Finding:
+    """A finding that only says whether a statement holds: no count, no value."""
+    detail = f"{statement}: {holds}"
+    return _passed(check, detail) if holds else _failed(check, detail)
+
+
 def _listed(values: Sequence[object]) -> str:
     shown = ", ".join(repr(value) for value in values[:_MAX_LISTED_VALUES])
     extra = len(values) - _MAX_LISTED_VALUES
@@ -186,6 +204,10 @@ def _read_checking_dtypes(
     """Read the columns with their declared types, reporting every column that fails."""
     check = "dtypes"
     findings: list[Finding] = []
+    if not columns:
+        # An empty include list makes pyarrow read every column, undeclared ones included,
+        # with inferred types.
+        return findings, None
     readable = list(columns)
     try:
         frame = read_raw_csv(csv_path, columns)
@@ -225,29 +247,37 @@ def _read_checking_dtypes(
     return findings, frame
 
 
-def check_domains(frame: pd.DataFrame) -> list[Finding]:
+def check_domains(frame: pd.DataFrame, period: Period = Period.REFERENCE) -> list[Finding]:
     """Check that every column with a closed domain only holds values from it.
 
     Values are taken from the rows, never from a categorical's categories: after a
     split, the categories of one period still list the values seen in the other.
 
     Args:
-        frame: Rows to check, with raw (open) categories.
+        frame: Rows of one period, with raw (open) categories.
+        period: Period of the rows. On production, a finding only says whether every
+            value is within the domain; on reference, it also counts and lists the
+            values outside it, and names the declared values that never occur.
 
     Returns:
-        One finding per column with a closed domain, plus an informational one for each
-        declared value that never occurs.
+        One finding per column with a closed domain, plus, on reference, an
+        informational one for each column with declared values that never occur.
     """
     findings: list[Finding] = []
     for spec in COLUMN_SPECS:
         if spec.allowed_values is None:
             continue
-        check = f"domain:{spec.name}"
+        check = f"{period.value} domain:{spec.name}"
         if spec.name not in frame.columns:
             findings.append(_skipped(check, "column could not be read"))
             continue
         present = frame[spec.name].dropna()
-        outside = present[~present.isin(spec.allowed_values)]
+        inside = present.isin(spec.allowed_values)
+        if period is Period.PRODUCTION:
+            statement = "every value within the declared domain"
+            findings.append(_boolean(check, statement, bool(inside.all())))
+            continue
+        outside = present[~inside]
         if len(outside):
             values = sorted(outside.astype(str).unique().tolist())
             findings.append(
@@ -270,11 +300,13 @@ def check_domains(frame: pd.DataFrame) -> list[Finding]:
     return findings
 
 
-def check_nulls(frame: pd.DataFrame) -> list[Finding]:
+def check_nulls(frame: pd.DataFrame, period: Period = Period.REFERENCE) -> list[Finding]:
     """Check that no column holds missing values unless the schema admits them.
 
     Args:
-        frame: Rows to check.
+        frame: Rows of one period.
+        period: Period of the rows. On production, a finding only says whether forbidden
+            missing values are present; on reference, it also counts them.
 
     Returns:
         One failed finding per column with forbidden nulls, one skipped finding per
@@ -283,63 +315,68 @@ def check_nulls(frame: pd.DataFrame) -> list[Finding]:
     findings: list[Finding] = []
     clean = []
     for spec in COLUMN_SPECS:
-        check = f"nulls:{spec.name}"
+        check = f"{period.value} nulls:{spec.name}"
         if spec.name not in frame.columns:
             findings.append(_skipped(check, "column could not be read"))
             continue
-        missing = int(frame[spec.name].isna().sum())
-        if missing and not spec.nullable:
-            findings.append(_failed(check, f"{missing} missing values; the schema admits none"))
-        else:
+        if spec.nullable:
             clean.append(spec.name)
+        elif period is Period.PRODUCTION:
+            if frame[spec.name].isna().any():
+                findings.append(_boolean(check, "no forbidden missing values", False))
+            else:
+                clean.append(spec.name)
+        else:
+            missing = int(frame[spec.name].isna().sum())
+            if missing:
+                findings.append(_failed(check, f"{missing} missing values; the schema admits none"))
+            else:
+                clean.append(spec.name)
     if clean:
-        findings.append(_passed("nulls", f"no forbidden missing values in {len(clean)} columns"))
+        check = f"{period.value} nulls"
+        if period is Period.PRODUCTION:
+            findings.append(
+                _boolean(check, "no forbidden missing values in the remaining columns", True)
+            )
+        else:
+            findings.append(_passed(check, f"no forbidden missing values in {len(clean)} columns"))
     return findings
 
 
-def check_partition(
-    csv_data_lines: int, parsed_rows: int, reference_rows: int, production_rows: int
-) -> list[Finding]:
-    """Check that no row is lost between the file, the parser and the two periods.
+def check_parsed_rows(csv_data_lines: int, parsed_rows: int) -> Finding:
+    """Check that the parser returned one row per data line of the file.
 
     Args:
         csv_data_lines: Lines of the file after the header, counted on its raw bytes.
+        parsed_rows: Rows the parser returned.
+
+    Returns:
+        The finding of the check.
+    """
+    if parsed_rows == csv_data_lines:
+        return _passed("rows:parsed", f"{parsed_rows} rows, one per data line")
+    return _failed(
+        "rows:parsed",
+        f"the parser returned {parsed_rows} rows for {csv_data_lines} data lines; "
+        "blank lines are skipped by the parser and a quoted line break merges two",
+    )
+
+
+def check_periods(parsed_rows: int, reference_rows: int, production_rows: int) -> Finding:
+    """Check that every parsed row falls in exactly one of the two periods.
+
+    The finding is a boolean, with no count, because the check involves production.
+
+    Args:
         parsed_rows: Rows the parser returned.
         reference_rows: Rows assigned to the reference period.
         production_rows: Rows assigned to the production period.
 
     Returns:
-        One finding for the parser against the file, one for the periods against the
-        parser.
+        The finding of the check.
     """
-    findings = []
-    if parsed_rows == csv_data_lines:
-        findings.append(_passed("rows:parsed", f"{parsed_rows} rows, one per data line"))
-    else:
-        findings.append(
-            _failed(
-                "rows:parsed",
-                f"the parser returned {parsed_rows} rows for {csv_data_lines} data lines; "
-                "blank lines are skipped by the parser and a quoted line break merges two",
-            )
-        )
-    period_sum = reference_rows + production_rows
-    if period_sum == parsed_rows:
-        findings.append(
-            _passed(
-                "rows:periods",
-                f"reference {reference_rows} + production {production_rows} = {parsed_rows}",
-            )
-        )
-    else:
-        findings.append(
-            _failed(
-                "rows:periods",
-                f"reference {reference_rows} + production {production_rows} = {period_sum}, "
-                f"not {parsed_rows}: {parsed_rows - period_sum} rows fall in neither period",
-            )
-        )
-    return findings
+    holds = reference_rows + production_rows == parsed_rows
+    return _boolean("rows:periods", "reference rows + production rows = parsed rows", holds)
 
 
 def validate_raw_csv(csv_path: Path) -> ValidationReport:
@@ -360,28 +397,28 @@ def validate_raw_csv(csv_path: Path) -> ValidationReport:
     dtype_findings, frame = _read_checking_dtypes(csv_path, present)
     findings.extend(dtype_findings)
 
-    step_is_usable = (
-        frame is not None
-        and STEP_COLUMN in frame.columns
-        and pd.api.types.is_integer_dtype(frame[STEP_COLUMN].dtype)
-    )
-    if frame is None or not step_is_usable:
-        reason = "the period split needs an integer 'step' column without missing values"
+    period_checks = [f"{period.value} {kind}" for period in Period for kind in ("domains", "nulls")]
+    if frame is None:
+        reason = "no column could be read"
         findings.extend(
-            _skipped(check, reason) for check in ("domains", "nulls", "rows:parsed", "rows:periods")
+            _skipped(check, reason) for check in (*period_checks, "rows:parsed", "rows:periods")
         )
         return ValidationReport(source=csv_path.name, findings=tuple(findings))
 
-    reference, production = split_periods(frame)
-    findings.extend(check_domains(reference))
-    findings.extend(check_nulls(reference))
-    findings.append(
-        _skipped(
-            "production content",
-            "domains and nulls of the production period are reserved for phase 4 by the "
-            "temporal cut; production is only parsed and counted",
-        )
-    )
     csv_data_lines = max(scan_lines(csv_path).line_count - 1, 0)
-    findings.extend(check_partition(csv_data_lines, len(frame), len(reference), len(production)))
+    findings.append(check_parsed_rows(csv_data_lines, len(frame)))
+
+    step_is_usable = STEP_COLUMN in frame.columns and pd.api.types.is_integer_dtype(
+        frame[STEP_COLUMN].dtype
+    )
+    if not step_is_usable:
+        reason = "the period split needs an integer 'step' column without missing values"
+        findings.extend(_skipped(check, reason) for check in (*period_checks, "rows:periods"))
+        return ValidationReport(source=csv_path.name, findings=tuple(findings))
+
+    reference, production = split_periods(frame)
+    for rows, period in ((reference, Period.REFERENCE), (production, Period.PRODUCTION)):
+        findings.extend(check_domains(rows, period))
+        findings.extend(check_nulls(rows, period))
+    findings.append(check_periods(len(frame), len(reference), len(production)))
     return ValidationReport(source=csv_path.name, findings=tuple(findings))

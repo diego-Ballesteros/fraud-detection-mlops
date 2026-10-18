@@ -597,7 +597,13 @@ def label_correlations(frame: pd.DataFrame) -> pd.DataFrame:
     )
 
 
-# --- Beyond the requested list: what measurements 9 and 12 made suspicious ----------------
+# --- Beyond the requested list: what measurements 9 and 12 made suspicious, and the -------
+# --- facts the data dictionary cites -----------------------------------------------------
+
+
+def _amount_equals_balance(frame: pd.DataFrame, tolerance: float) -> pd.Series:
+    """Rows where the amount equals the origin's balance before the transaction."""
+    return (frame[AMOUNT_COLUMN] - frame["oldbalanceOrg"]).abs() <= tolerance
 
 
 def balance_consistency_by_type(
@@ -703,7 +709,7 @@ def amount_equals_origin_balance(
         One row per observed type and label value: its rows, the rows where the amount
         equals ``oldbalanceOrg``, and their share.
     """
-    equal = (frame[AMOUNT_COLUMN] - frame["oldbalanceOrg"]).abs() <= tolerance
+    equal = _amount_equals_balance(frame, tolerance)
     table = pd.DataFrame(
         {TYPE_COLUMN: frame[TYPE_COLUMN], TARGET_COLUMN: frame[TARGET_COLUMN], "equal": equal}
     )
@@ -711,3 +717,82 @@ def amount_equals_origin_balance(
     return pd.DataFrame(
         {"rows": grouped.size(), "amount_equals_balance": grouped.sum(), "share": grouped.mean()}
     )
+
+
+@dataclass(frozen=True)
+class RuleOutcome:
+    """How a boolean rule separates the label.
+
+    Attributes:
+        flagged_rows: Rows the rule flags.
+        true_positives: Flagged rows with the positive label.
+        false_positives: Flagged rows with the negative label.
+        false_negatives: Positive rows the rule does not flag.
+    """
+
+    flagged_rows: int
+    true_positives: int
+    false_positives: int
+    false_negatives: int
+
+    @property
+    def precision(self) -> float:
+        """Share of the flagged rows that are positive; NaN when nothing is flagged."""
+        if not self.flagged_rows:
+            return float("nan")
+        return self.true_positives / self.flagged_rows
+
+    @property
+    def recall(self) -> float:
+        """Share of the positive rows that are flagged; NaN when there are no positives."""
+        positives = self.true_positives + self.false_negatives
+        if not positives:
+            return float("nan")
+        return self.true_positives / positives
+
+
+def signature_rule_outcome(
+    frame: pd.DataFrame,
+    tolerance: float = BALANCE_TOLERANCE,
+    types: Sequence[str] | None = None,
+) -> RuleOutcome:
+    """Evaluate the simulator's signature as a rule against the label.
+
+    The rule flags the rows where ``amount`` equals ``oldbalanceOrg`` within
+    ``tolerance`` and, when ``types`` is given, whose type is one of them. A row with
+    ``amount == 0`` and ``oldbalanceOrg == 0`` satisfies the equality too.
+
+    Args:
+        frame: Data to measure.
+        tolerance: Largest absolute difference counted as equal.
+        types: Transaction types the rule is restricted to; None applies it to all.
+
+    Returns:
+        The confusion counts of the rule against the label.
+    """
+    flagged = _amount_equals_balance(frame, tolerance)
+    if types is not None:
+        flagged = flagged & frame[TYPE_COLUMN].isin(types)
+    positive = frame[TARGET_COLUMN] == BINARY_VALUES[1]
+    return RuleOutcome(
+        flagged_rows=int(flagged.sum()),
+        true_positives=int((flagged & positive).sum()),
+        false_positives=int((flagged & ~positive).sum()),
+        false_negatives=int((~flagged & positive).sum()),
+    )
+
+
+def destination_prefix_by_type(frame: pd.DataFrame) -> pd.DataFrame:
+    """Count the rows per transaction type and first character of ``nameDest``.
+
+    Per the dataset documentation, a leading 'M' marks a merchant, and merchants carry no
+    destination balance information.
+
+    Args:
+        frame: Data to measure.
+
+    Returns:
+        One row per observed type and one column per observed prefix, in absolute counts.
+    """
+    prefix = frame["nameDest"].str.slice(0, 1).rename("prefix")
+    return frame.groupby([frame[TYPE_COLUMN], prefix], observed=True).size().unstack(fill_value=0)

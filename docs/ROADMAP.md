@@ -105,8 +105,12 @@ dashboard sobre los mismos artefactos cubre ambos.
 |---|---|
 | Registros | ~6,3 millones |
 | Columnas | 11 |
-| Clase positiva | ~0,13% (a verificar) |
+| Clase positiva | 0,0774% en referencia: 4.477 de 5.787.030 (medido el 2026-10-18) |
 | Ubicación | `data/raw/`, gitignoreado |
+
+La tasa del periodo completo no se mide hasta la fase 4, porque requiere producción.
+Tampoco se estima: con la cifra de referencia y un dato externo se podría despejar la de
+producción por resta, y una estimación influye las decisiones igual que una medición.
 
 ### El corte temporal es el regalo de este proyecto
 
@@ -263,7 +267,8 @@ fraud-detection-mlops/
 │   └── monitoring/    drift · performance · report
 │
 ├── scripts/
-│   ├── run_preprocessing.py
+│   ├── prepare_data.py            ← CSV → dos parquet, validación y mediciones
+│   ├── (script del Pipeline)      ← fase 1, turno siguiente; nombre por decidir
 │   ├── run_training.py            ← el AutoML
 │   ├── run_prediction.py
 │   ├── run_leakage_check.py

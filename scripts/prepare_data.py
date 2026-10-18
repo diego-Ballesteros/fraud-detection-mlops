@@ -60,7 +60,7 @@ def _report_file_structure() -> None:
 
 
 def _validate() -> bool:
-    _section("VALIDATION (structure on the whole file; content on the reference period)")
+    _section("VALIDATION (whole file; production checks report True or False, never a count)")
     report = validator.validate_raw_csv(loader.RAW_CSV_PATH)
     print(report.render())
     return not report.blocking_failures
@@ -207,6 +207,22 @@ def _report_extra(reference: pd.DataFrame) -> None:
     _section("EXTRA C. SUSPECTED: oldbalanceOrg WITH amount. amount == oldbalanceOrg (reference)")
     print(f"equal within the declared tolerance, {profiling.BALANCE_TOLERANCE}")
     _show(profiling.amount_equals_origin_balance(reference))
+    rules = {
+        "amount == oldbalanceOrg": None,
+        "amount == oldbalanceOrg and type in (TRANSFER, CASH_OUT)": ("TRANSFER", "CASH_OUT"),
+    }
+    for name, types in rules.items():
+        outcome = profiling.signature_rule_outcome(reference, types=types)
+        print(f"\nas a rule against isFraud: {name}")
+        print(f"  flagged rows    : {outcome.flagged_rows}")
+        print(f"  true positives  : {outcome.true_positives}")
+        print(f"  false positives : {outcome.false_positives}")
+        print(f"  false negatives : {outcome.false_negatives}")
+        print(f"  precision       : {outcome.precision:.6f}")
+        print(f"  recall          : {outcome.recall:.6f}")
+
+    _section("EXTRA D. FIRST CHARACTER OF nameDest PER TRANSACTION TYPE (reference period)")
+    _show(profiling.destination_prefix_by_type(reference))
 
 
 def main() -> int:

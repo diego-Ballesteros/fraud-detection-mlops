@@ -200,3 +200,31 @@ correlativo.
 - **Aprendizaje:** que pandas importe no garantiza que todos sus métodos corran.
 - **Referencias:** `src/fraud_detection/data/profiling.py`, en el docstring de la función
   de correlación.
+- **Nota de estado (2026-10-18):** la defensa subió a nivel 2 en la misma fase.
+  `tests/test_profiling.py` tiene un test por función de medición. El de correlación
+  verifica Spearman con empates contra un valor calculado a mano, que se distingue del de
+  Pearson, así que volver a `method="spearman"` falla en CI mientras scipy no esté en el
+  grafo.
+
+### ERR-008 · Una lista de inclusión vacía significa "todas las columnas" · 2026-10-18
+
+- **Síntoma:** ninguno visible. Medido antes de corregir: `read_raw_csv` con una lista
+  vacía de columnas, sobre un CSV con encabezado `foo,bar`, devolvió las dos columnas, con
+  dtypes inferidos `int64` y `string`.
+- **Mecanismo:** en `pyarrow.csv.ConvertOptions`, un `include_columns` vacío significa
+  "todas las columnas", no "ninguna". El validador lee las columnas declaradas que aparecen
+  en el encabezado. Si no aparece ninguna, la lista vacía invierte el significado, y el
+  lector infiere tipos sobre columnas que nadie declaró: lo que el loader dice no hacer
+  nunca.
+- **Cómo se detectó:** al escribir los tests del validador, revisando el camino en que no
+  hay nada que leer. Se confirmó con la medición antes de corregir.
+- **Corrección:** el validador no lee nada cuando ninguna columna declarada está presente,
+  y los chequeos que dependen de la lectura salen omitidos.
+- **Defensa:** nivel 2: el test del validador que exige que un chequeo que no puede
+  ejecutarse salga omitido cubre un archivo sin columnas declaradas. `loader.read_raw_csv`
+  conserva el comportamiento con una lista vacía; quedó fuera del alcance del turno y se
+  reportó.
+- **Aprendizaje:** el caso vacío de un parámetro se prueba; "vacío" no siempre quiere
+  decir "nada".
+- **Referencias:** `src/fraud_detection/data/validator.py`, en la lectura con dtypes
+  declarados.
