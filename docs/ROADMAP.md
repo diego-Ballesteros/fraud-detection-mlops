@@ -242,6 +242,7 @@ fraud-detection-mlops/
 │   ├── ROADMAP.md
 │   ├── GIT_STRATEGY.md
 │   ├── DATA_DICTIONARY.md         ← requisito: incluye cuándo existe cada columna
+│   ├── DEPENDENCIES.md            ← dependencias y sus pisos; se lee antes de un uv add
 │   ├── MODEL_CARD.md
 │   ├── EVALUATION.md
 │   ├── ERRORS_AND_LEARNINGS.md
@@ -258,17 +259,10 @@ fraud-detection-mlops/
 │   ├── 03_interpretability.ipynb
 │   └── 04_monitoring.ipynb
 │
-├── src/fraud_detection/
-│   ├── config.py
-│   ├── data/          loader · schema · validator · preprocessor
-│   ├── features/      builder
-│   ├── models/        estimators · search_space · evaluation · tracking · registry
-│   ├── explain/       global_explain · local_explain
-│   └── monitoring/    drift · performance · report
+├── src/fraud_detection/           ← sus módulos y su estado: tabla de abajo
 │
 ├── scripts/
 │   ├── prepare_data.py            ← CSV → dos parquet, validación y mediciones
-│   ├── (script del Pipeline)      ← fase 1, turno siguiente; nombre por decidir
 │   ├── run_training.py            ← el AutoML
 │   ├── run_prediction.py
 │   ├── run_leakage_check.py
@@ -282,6 +276,35 @@ fraud-detection-mlops/
 ├── tests/
 └── .github/workflows/ci.yml
 ```
+
+### Módulos de `src/fraud_detection/`
+
+Un módulo es un archivo `.py` del paquete, sin contar los `__init__.py`. `existe` quiere decir
+que el archivo está en el repositorio; `fase N`, que está planificado para esa fase y todavía
+no existe. `tests/test_docs_consistency.py` verifica la tabla contra el código en las dos
+direcciones: un módulo sin fila, una fila `existe` sin archivo o una fila planificada cuyo
+archivo ya existe hacen fallar el test.
+
+| Paquete | Módulo | Estado |
+|---|---|---|
+| (raíz) | config | existe |
+| data | loader | existe |
+| data | schema | existe |
+| data | validator | existe |
+| data | profiling | existe |
+| features | builder | existe |
+| features | pipeline | existe |
+| models | baseline | existe |
+| models | estimators | fase 2 |
+| models | search_space | fase 2 |
+| models | evaluation | fase 2 |
+| models | tracking | fase 2 |
+| models | registry | fase 2 |
+| explain | global_explain | fase 3 |
+| explain | local_explain | fase 3 |
+| monitoring | drift | fase 4 |
+| monitoring | performance | fase 4 |
+| monitoring | report | fase 4 |
 
 ---
 

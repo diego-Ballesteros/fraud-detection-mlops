@@ -30,6 +30,15 @@ SYS_PATH = re.compile(
     """,
     re.VERBOSE,
 )
+NOTEBOOKS_DIR = settings.ROOT_DIR / "notebooks"
+READS_PRODUCTION = re.compile(
+    r"""
+    \bread_production\b                             # loader.read_production()
+    | \bPRODUCTION_PATH\b                           # pd.read_parquet(loader.PRODUCTION_PATH)
+    | \bproduction\.parquet\b                       # the file, named directly
+    """,
+    re.VERBOSE,
+)
 
 
 def _files_under(roots: list[Path]) -> list[Path]:
@@ -102,3 +111,27 @@ def test_no_sys_path_manipulation(tmp_path: Path) -> None:
 
     offenders = _violations(SYS_PATH, _scanned_files())
     assert not offenders, f"sys.path manipulation; import the installed package: {offenders}"
+
+
+def test_no_notebook_reads_production(tmp_path: Path) -> None:
+    violations = [
+        "frame = loader.read_production()",
+        "pd.read_parquet(loader.PRODUCTION_PATH)",
+        'pd.read_parquet("data/processed/production.parquet")',
+    ]
+    sanctioned = [
+        "frame = loader.read_reference()",
+        "settings.PRODUCTION_FIRST_STEP",
+        "production_rows = 0",
+    ]
+    # Positive and negative controls, as in the other two tests.
+    assert [text for text in violations if not READS_PRODUCTION.search(text)] == []
+    assert [text for text in sanctioned if READS_PRODUCTION.search(text)] == []
+    notebook = json.dumps({"cells": [{"source": [f"{text}\n" for text in violations]}]}, indent=1)
+    (tmp_path / "bad.ipynb").write_text(notebook, encoding="utf-8")
+    assert len(_violations(READS_PRODUCTION, _files_under([tmp_path]))) == len(violations)
+
+    notebooks = _files_under([NOTEBOOKS_DIR])
+    assert notebooks, f"No notebook under {NOTEBOOKS_DIR}: the scan would pass vacuously"
+    offenders = _violations(READS_PRODUCTION, notebooks)
+    assert not offenders, f"A notebook reads the production period: {offenders}"

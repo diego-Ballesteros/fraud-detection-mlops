@@ -55,6 +55,7 @@ class ColumnSpec:
         justification: One line on why ``availability`` holds.
         allowed_values: Closed domain of the column, or None when it has none.
         nullable: Whether the contract admits missing values.
+        non_negative: Whether every value must be zero or greater.
     """
 
     name: str
@@ -63,6 +64,7 @@ class ColumnSpec:
     justification: str
     allowed_values: tuple[str, ...] | tuple[int, ...] | None = None
     nullable: bool = False
+    non_negative: bool = False
 
 
 # The public dataset documentation spells two of these "CASH-IN" and "CASH-OUT"; the CSV
@@ -94,6 +96,7 @@ COLUMN_SPECS: Final[tuple[ColumnSpec, ...]] = (
         dtype=np.dtype("float64"),
         availability=Availability.PRE_TRANSACTION,
         justification="Amount the customer asks to move; part of the request itself.",
+        non_negative=True,
     ),
     ColumnSpec(
         name="nameOrig",
@@ -109,6 +112,7 @@ COLUMN_SPECS: Final[tuple[ColumnSpec, ...]] = (
             "Documented as the origin account's balance before the transaction; it is the "
             "requesting customer's own balance."
         ),
+        non_negative=True,
     ),
     ColumnSpec(
         name="newbalanceOrig",
@@ -135,6 +139,7 @@ COLUMN_SPECS: Final[tuple[ColumnSpec, ...]] = (
             "Documented as the recipient's balance before the transaction; the documentation "
             "adds that merchants ('M') carry no balance information."
         ),
+        non_negative=True,
     ),
     ColumnSpec(
         name="newbalanceDest",

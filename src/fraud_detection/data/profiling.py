@@ -14,11 +14,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
+import numpy as np
 import pandas as pd
 
 from fraud_detection.config import settings
 from fraud_detection.data.loader import STEP_COLUMN, LineScan, count_parquet_rows, scan_lines
 from fraud_detection.data.schema import BINARY_VALUES, TARGET_COLUMN
+from fraud_detection.features.builder import amount_equals_origin_balance
 
 TYPE_COLUMN: Final[str] = "type"
 AMOUNT_COLUMN: Final[str] = "amount"
@@ -601,11 +603,6 @@ def label_correlations(frame: pd.DataFrame) -> pd.DataFrame:
 # --- facts the data dictionary cites -----------------------------------------------------
 
 
-def _amount_equals_balance(frame: pd.DataFrame, tolerance: float) -> pd.Series:
-    """Rows where the amount equals the origin's balance before the transaction."""
-    return (frame[AMOUNT_COLUMN] - frame["oldbalanceOrg"]).abs() <= tolerance
-
-
 def balance_consistency_by_type(
     frame: pd.DataFrame, tolerance: float = BALANCE_TOLERANCE
 ) -> pd.DataFrame:
@@ -692,30 +689,37 @@ def label_by_step(
     )
 
 
-def amount_equals_origin_balance(
-    frame: pd.DataFrame, tolerance: float = BALANCE_TOLERANCE
-) -> pd.DataFrame:
-    """Measure how often the amount equals the origin's balance before the transaction.
+def signature_by_type(frame: pd.DataFrame) -> pd.DataFrame:
+    """Measure the simulator's signature per transaction type and label value.
 
-    Both columns are declared PRE_TRANSACTION. A zero origin error with a zero balance
-    after the transaction implies this equality, so this measures how much of the origin
-    error's signal is already present before the transaction.
+    The signature is ``features.builder.amount_equals_origin_balance``, the same function
+    the feature and the baseline use. Both of its columns are declared PRE_TRANSACTION.
+    The table also counts the degenerate case the definition excludes: a movement of zero
+    over a balance of zero.
 
     Args:
         frame: Data to measure.
-        tolerance: Largest absolute difference counted as equal.
 
     Returns:
-        One row per observed type and label value: its rows, the rows where the amount
-        equals ``oldbalanceOrg``, and their share.
+        One row per observed type and label value: its rows, the rows with the signature,
+        their share, and the rows with ``amount == 0`` and ``oldbalanceOrg == 0``.
     """
-    equal = _amount_equals_balance(frame, tolerance)
     table = pd.DataFrame(
-        {TYPE_COLUMN: frame[TYPE_COLUMN], TARGET_COLUMN: frame[TARGET_COLUMN], "equal": equal}
+        {
+            TYPE_COLUMN: frame[TYPE_COLUMN],
+            TARGET_COLUMN: frame[TARGET_COLUMN],
+            "signature": amount_equals_origin_balance(frame),
+            "zero_over_zero": (frame[AMOUNT_COLUMN] == 0) & (frame["oldbalanceOrg"] == 0),
+        }
     )
-    grouped = table.groupby([TYPE_COLUMN, TARGET_COLUMN], observed=True)["equal"]
+    grouped = table.groupby([TYPE_COLUMN, TARGET_COLUMN], observed=True)
     return pd.DataFrame(
-        {"rows": grouped.size(), "amount_equals_balance": grouped.sum(), "share": grouped.mean()}
+        {
+            "rows": grouped.size(),
+            "signature": grouped["signature"].sum(),
+            "share": grouped["signature"].mean(),
+            "zero_over_zero": grouped["zero_over_zero"].sum(),
+        }
     )
 
 
@@ -728,12 +732,14 @@ class RuleOutcome:
         true_positives: Flagged rows with the positive label.
         false_positives: Flagged rows with the negative label.
         false_negatives: Positive rows the rule does not flag.
+        true_negatives: Negative rows the rule does not flag.
     """
 
     flagged_rows: int
     true_positives: int
     false_positives: int
     false_negatives: int
+    true_negatives: int
 
     @property
     def precision(self) -> float:
@@ -751,35 +757,45 @@ class RuleOutcome:
         return self.true_positives / positives
 
 
-def signature_rule_outcome(
-    frame: pd.DataFrame,
-    tolerance: float = BALANCE_TOLERANCE,
-    types: Sequence[str] | None = None,
-) -> RuleOutcome:
+def rule_outcome(flagged: Sequence[bool] | pd.Series, label: pd.Series) -> RuleOutcome:
+    """Count how a set of flags separates the label.
+
+    Args:
+        flagged: One flag per row, in the order of ``label``: a rule's mask or an
+            estimator's predictions.
+        label: The label of each row.
+
+    Returns:
+        The confusion counts of the flags against the label.
+    """
+    flags = np.asarray(flagged).astype(bool)
+    positive = np.asarray(label == BINARY_VALUES[1])
+    return RuleOutcome(
+        flagged_rows=int(flags.sum()),
+        true_positives=int((flags & positive).sum()),
+        false_positives=int((flags & ~positive).sum()),
+        false_negatives=int((~flags & positive).sum()),
+        true_negatives=int((~flags & ~positive).sum()),
+    )
+
+
+def signature_rule_outcome(frame: pd.DataFrame, types: Sequence[str] | None = None) -> RuleOutcome:
     """Evaluate the simulator's signature as a rule against the label.
 
-    The rule flags the rows where ``amount`` equals ``oldbalanceOrg`` within
-    ``tolerance`` and, when ``types`` is given, whose type is one of them. A row with
-    ``amount == 0`` and ``oldbalanceOrg == 0`` satisfies the equality too.
+    The rule is ``features.builder.amount_equals_origin_balance``, restricted to
+    ``types`` when they are given.
 
     Args:
         frame: Data to measure.
-        tolerance: Largest absolute difference counted as equal.
         types: Transaction types the rule is restricted to; None applies it to all.
 
     Returns:
         The confusion counts of the rule against the label.
     """
-    flagged = _amount_equals_balance(frame, tolerance)
+    flagged = amount_equals_origin_balance(frame)
     if types is not None:
         flagged = flagged & frame[TYPE_COLUMN].isin(types)
-    positive = frame[TARGET_COLUMN] == BINARY_VALUES[1]
-    return RuleOutcome(
-        flagged_rows=int(flagged.sum()),
-        true_positives=int((flagged & positive).sum()),
-        false_positives=int((flagged & ~positive).sum()),
-        false_negatives=int((~flagged & positive).sum()),
-    )
+    return rule_outcome(flagged, frame[TARGET_COLUMN])
 
 
 def destination_prefix_by_type(frame: pd.DataFrame) -> pd.DataFrame:
@@ -796,3 +812,251 @@ def destination_prefix_by_type(frame: pd.DataFrame) -> pd.DataFrame:
     """
     prefix = frame["nameDest"].str.slice(0, 1).rename("prefix")
     return frame.groupby([frame[TYPE_COLUMN], prefix], observed=True).size().unstack(fill_value=0)
+
+
+# --- Weekly structure: does day_of_week carry anything? ------------------------------------
+
+STEPS_PER_DAY: Final[int] = 24
+DAYS_PER_WEEK: Final[int] = 7
+
+
+def _rows_per_step(frame: pd.DataFrame, period_last_step: int) -> pd.Series:
+    """Rows per step from the first observed step to the period's last, zeros included."""
+    step = frame[STEP_COLUMN]
+    expected = range(int(step.min()), period_last_step + 1)
+    return step.value_counts().reindex(expected, fill_value=0)
+
+
+def rows_per_step_by_day_of_cycle(
+    frame: pd.DataFrame, period_last_step: int = settings.REFERENCE_LAST_STEP
+) -> pd.DataFrame:
+    """Measure the mean rows per step for each position in a 7-day cycle.
+
+    The position is ``(step // 24) % 7``. A day that the period cuts short (the first
+    one, because the first step is 1, and possibly the last one) still counts here, with
+    the steps it has.
+
+    Args:
+        frame: Data to measure.
+        period_last_step: Last step of the period the frame belongs to.
+
+    Returns:
+        One row per position in the cycle: how many days and steps it covers, its rows,
+        and its mean rows per step.
+    """
+    rows = _rows_per_step(frame, period_last_step)
+    day = rows.index // STEPS_PER_DAY
+    grouped = rows.groupby(day % DAYS_PER_WEEK)
+    table = pd.DataFrame(
+        {
+            "days": pd.Series(day, index=rows.index).groupby(day % DAYS_PER_WEEK).nunique(),
+            "steps": grouped.size(),
+            "rows": grouped.sum(),
+            "mean_rows_per_step": grouped.mean(),
+        }
+    )
+    table.index.name = "day_of_cycle"
+    return table
+
+
+@dataclass(frozen=True)
+class DailyAutocorrelation:
+    """Autocorrelation of the number of rows per day, over complete days only.
+
+    Attributes:
+        daily_rows: Rows per complete day, indexed by day number (``step // 24``).
+        autocorrelation: Sample autocorrelation of ``daily_rows`` per lag.
+        band: ``2 / sqrt(n)``, the approximate 95% band of an autocorrelation under no
+            serial dependence, with ``n`` complete days.
+    """
+
+    daily_rows: pd.Series
+    autocorrelation: pd.Series
+    band: float
+
+    def peaks_at(self, lag: int) -> bool:
+        """Whether ``lag`` has the largest autocorrelation of all lags and exceeds the band.
+
+        This is the criterion, fixed before measuring, for a periodicity of ``lag`` days.
+
+        Args:
+            lag: The lag to test.
+
+        Returns:
+            True when the autocorrelation at ``lag`` is the maximum and above ``band``.
+        """
+        value = self.autocorrelation[lag]
+        return bool(value == self.autocorrelation.max() and value > self.band)
+
+
+def daily_volume_autocorrelation(
+    frame: pd.DataFrame,
+    lags: Sequence[int] = range(1, 9),
+    period_last_step: int = settings.REFERENCE_LAST_STEP,
+) -> DailyAutocorrelation:
+    """Measure the autocorrelation of the rows per day across complete days.
+
+    A day is complete when its 24 steps lie between the first observed step and the
+    period's last step; a day the period cuts short would look like a drop in volume. The
+    estimator is the standard sample autocorrelation: the lagged cross-products of the
+    deviations from the mean, over the sum of squared deviations.
+
+    Args:
+        frame: Data to measure.
+        lags: Lags, in days.
+        period_last_step: Last step of the period the frame belongs to.
+
+    Returns:
+        The rows per complete day, their autocorrelation per lag, and the 95% band.
+    """
+    rows = _rows_per_step(frame, period_last_step)
+    first_step = int(rows.index.min())
+    per_day = rows.groupby(rows.index // STEPS_PER_DAY).sum().rename_axis("day")
+    complete = [
+        day
+        for day in per_day.index
+        if day * STEPS_PER_DAY >= first_step and (day + 1) * STEPS_PER_DAY - 1 <= period_last_step
+    ]
+    daily = per_day.loc[complete].astype(float)
+    deviations = (daily - daily.mean()).to_numpy()
+    total = float((deviations**2).sum())
+    autocorrelation = pd.Series(
+        {lag: float((deviations[:-lag] * deviations[lag:]).sum()) / total for lag in lags}
+    )
+    autocorrelation.index.name = "lag"
+    return DailyAutocorrelation(
+        daily_rows=daily, autocorrelation=autocorrelation, band=2 / len(daily) ** 0.5
+    )
+
+
+# --- For the figures of notebook 01 ------------------------------------------------------
+
+
+def sample_with_all_positives(
+    frame: pd.DataFrame, negative_rows: int, random_state: int = settings.RANDOM_STATE
+) -> pd.DataFrame:
+    """Keep every positive row and a uniform random sample of the negative rows.
+
+    A uniform sample of the whole frame keeps almost no positive row when they are rare;
+    this one keeps all of them, so a figure built on it can show the positive class.
+
+    Args:
+        frame: Rows to sample.
+        negative_rows: How many negative rows to keep, drawn without replacement.
+        random_state: Seed of the draw; by default the project's.
+
+    Returns:
+        The positive rows, then the sampled negative rows, with their original index.
+
+    Raises:
+        ValueError: If more negative rows are requested than the frame has.
+    """
+    positive = frame[TARGET_COLUMN] == BINARY_VALUES[1]
+    negatives = frame.loc[~positive]
+    if negative_rows > len(negatives):
+        raise ValueError(f"{negative_rows} negative rows requested, {len(negatives)} available")
+    sampled = negatives.sample(n=negative_rows, random_state=random_state)
+    return pd.concat([frame.loc[positive], sampled])
+
+
+@dataclass(frozen=True)
+class LogHistogram:
+    """Distribution of a non-negative column per label value, on logarithmic bins.
+
+    Attributes:
+        edges: Bin edges, evenly spaced in log10, covering every positive value.
+        counts: One row per bin and one column per label value: the rows in the bin.
+        shares: Same layout: the share of each label value's positive rows in the bin.
+        zeros: Rows equal to zero, per label value; a logarithmic axis cannot show them.
+        zero_shares: ``zeros`` over all the rows of each label value.
+    """
+
+    edges: np.ndarray
+    counts: pd.DataFrame
+    shares: pd.DataFrame
+    zeros: pd.Series
+    zero_shares: pd.Series
+
+
+def log_histogram_by_label(
+    frame: pd.DataFrame, column: str, bins_per_decade: int = 4
+) -> LogHistogram:
+    """Count the positive values of a column per label value, on logarithmic bins.
+
+    The bins run from the power of ten at or below the smallest positive value to the one
+    at or above the largest, with ``bins_per_decade`` bins per power of ten. Each bin
+    includes its left edge; the last one includes both.
+
+    Args:
+        frame: Data to measure.
+        column: A column with no negative values.
+        bins_per_decade: Bins per power of ten.
+
+    Returns:
+        The edges, the counts and shares per bin and label value, and the zeros.
+
+    Raises:
+        ValueError: If the column holds a negative value.
+    """
+    values = frame[column]
+    if (values < 0).any():
+        raise ValueError(f"{column!r} holds negative values; a logarithmic axis needs >= 0")
+    label = frame[TARGET_COLUMN]
+    positive = values > 0
+    low = np.floor(np.log10(values[positive].min()))
+    high = np.ceil(np.log10(values[positive].max()))
+    edges = 10 ** np.linspace(low, high, int(high - low) * bins_per_decade + 1)
+    # Guard the ends against floating-point rounding of the powers of ten.
+    edges[0] = min(edges[0], values[positive].min())
+    edges[-1] = max(edges[-1], values[positive].max())
+    counts = pd.DataFrame(
+        {
+            value: np.histogram(values[positive & (label == value)], bins=edges)[0]
+            for value in BINARY_VALUES
+        }
+    )
+    per_label = counts.sum()
+    expected = positive.groupby(label).sum().reindex(BINARY_VALUES, fill_value=0)
+    if per_label.tolist() != expected.tolist():
+        raise ValueError("Some positive values fell outside the bins")
+    is_zero = (values == 0).groupby(label)
+    zeros = is_zero.sum().reindex(BINARY_VALUES, fill_value=0)
+    return LogHistogram(
+        edges=edges,
+        counts=counts,
+        shares=counts / per_label,
+        zeros=zeros,
+        zero_shares=is_zero.mean().reindex(BINARY_VALUES, fill_value=0.0),
+    )
+
+
+def label_rate_by_hour(frame: pd.DataFrame) -> pd.DataFrame:
+    """Measure the rows and the positive rate per hour of the day, ``step % 24``.
+
+    Args:
+        frame: Data to measure.
+
+    Returns:
+        One row per observed hour: its rows, its positive rows and their share.
+    """
+    hour = (frame[STEP_COLUMN] % STEPS_PER_DAY).rename("hour")
+    positive = (frame[TARGET_COLUMN] == BINARY_VALUES[1]).groupby(hour)
+    return pd.DataFrame(
+        {"rows": positive.size(), "positives": positive.sum(), "rate": positive.mean()}
+    )
+
+
+def occurrence_distribution(frame: pd.DataFrame, column: str) -> pd.Series:
+    """Count how many distinct values of a column occur exactly k times, for each k.
+
+    Args:
+        frame: Data to measure.
+        column: An identifier column.
+
+    Returns:
+        The number of distinct values per number of occurrences, sorted by occurrences.
+    """
+    occurrences = frame[column].value_counts()
+    distribution = occurrences.value_counts().sort_index()
+    distribution.index.name = "occurrences"
+    return distribution.rename("values")

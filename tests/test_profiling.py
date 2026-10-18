@@ -25,9 +25,10 @@ from fraud_detection.data.schema import COLUMN_SPECS, EXPECTED_COLUMNS
 # nameDest, oldbalanceDest, newbalanceDest, isFraud, isFlaggedFraud.
 # Per row, by hand: o = oldbalanceOrg - amount - newbalanceOrig,
 # d = oldbalanceDest + amount - newbalanceDest, "both zero" = both destination balances
-# zero with amount > 0, "equal" = amount == oldbalanceOrg.
+# zero with amount > 0, "equal" = amount == oldbalanceOrg, and "signature" = equal with
+# amount > 0, the definition in features.builder.
 ROWS: list[tuple[object, ...]] = [
-    # r1: o=0, d=100, both zero, equal
+    # r1: o=0, d=100, both zero, equal, signature
     (1, "TRANSFER", 100.0, "C1", 100.0, 0.0, "C90", 0.0, 0.0, 1, 0),
     # r2: o=0, d=0
     (1, "CASH_OUT", 50.0, "C1", 80.0, 30.0, "C90", 10.0, 60.0, 0, 0),
@@ -35,15 +36,15 @@ ROWS: list[tuple[object, ...]] = [
     (2, "PAYMENT", 20.0, "C2", 0.0, 0.0, "M1", 0.0, 0.0, 0, 0),
     # r4: o=-60, d=60; money enters the origin
     (2, "CASH_IN", 30.0, "C3", 10.0, 40.0, "C90", 50.0, 20.0, 0, 0),
-    # r5: o=-500000, d=500000, both zero, equal, flagged by the system
+    # r5: o=-500000, d=500000, both zero, equal, signature, flagged by the system
     (3, "TRANSFER", 500000.0, "C4", 500000.0, 500000.0, "C91", 0.0, 0.0, 1, 1),
     # r6: o=0.01 (exactly one cent), d=0
     (3, "CASH_OUT", 0.01, "C5", 0.02, 0.0, "C92", 0.0, 0.01, 0, 0),
     # r7: o=0, d=7, both zero; moves 7 of a balance of 10, so not equal
     (4, "TRANSFER", 7.0, "C6", 10.0, 3.0, "C93", 0.0, 0.0, 1, 0),
-    # r8: amount zero: o=0, d=0, equal (0 == 0); not both zero, because amount is 0
+    # r8: amount zero: o=0, d=0, equal (0 == 0) but no signature; not both zero
     (4, "CASH_OUT", 0.0, "C7", 0.0, 0.0, "C94", 0.0, 0.0, 1, 0),
-    # r9: o=0, d=15, both zero, equal; a legitimate payment
+    # r9: o=0, d=15, both zero, equal, signature; a legitimate payment
     (5, "PAYMENT", 15.0, "C8", 15.0, 0.0, "M2", 0.0, 0.0, 0, 0),
 ]
 # Label groups: isFraud=0 is r2, r3, r4, r6, r9 (5 rows); isFraud=1 is r1, r5, r7, r8 (4).
@@ -360,35 +361,48 @@ def test_label_by_step(frame: pd.DataFrame) -> None:
     assert by_step.summary[["count", "mean", "max"]].tolist() == pytest.approx([6, 4 / 6, 2])
 
 
-def test_amount_equals_origin_balance(frame: pd.DataFrame) -> None:
-    table = profiling.amount_equals_origin_balance(frame)
-    # rows, rows where amount == oldbalanceOrg, share.
+def test_signature_by_type(frame: pd.DataFrame) -> None:
+    table = profiling.signature_by_type(frame)
+    # rows, rows with the signature, their share, rows with 0 moved over a balance of 0.
     expected = {
-        ("CASH_IN", 0): [1, 0, 0.0],
-        ("CASH_OUT", 0): [2, 0, 0.0],
-        ("CASH_OUT", 1): [1, 1, 1.0],  # r8: 0 == 0
-        ("PAYMENT", 0): [2, 1, 0.5],  # r9
-        ("TRANSFER", 1): [3, 2, 2 / 3],  # r1 and r5; r7 moves 7 of 10
+        ("CASH_IN", 0): [1, 0, 0.0, 0],
+        ("CASH_OUT", 0): [2, 0, 0.0, 0],
+        ("CASH_OUT", 1): [1, 0, 0.0, 1],  # r8: 0 over 0, excluded from the signature
+        ("PAYMENT", 0): [2, 1, 0.5, 0],  # r9; r3 moves 20 over a balance of 0
+        ("TRANSFER", 1): [3, 2, 2 / 3, 0],  # r1 and r5; r7 moves 7 of 10
     }
     assert list(table.index) == list(expected)
     for key, values in expected.items():
         assert table.loc[key].tolist() == pytest.approx(values)
 
 
-def test_signature_rule_outcome(frame: pd.DataFrame) -> None:
-    # Equal rows: r1, r5, r8 (positive) and r9 (negative); r7 is a positive left out.
-    anywhere = profiling.signature_rule_outcome(frame)
-    assert anywhere == RuleOutcome(
-        flagged_rows=4, true_positives=3, false_positives=1, false_negatives=1
+def test_rule_outcome() -> None:
+    label = pd.Series(np.array([1, 1, 0, 0], dtype="int8"))
+    outcome = profiling.rule_outcome([True, False, True, False], label)
+    # The fourth row is the only negative left unflagged.
+    assert outcome == RuleOutcome(
+        flagged_rows=2, true_positives=1, false_positives=1, false_negatives=1, true_negatives=1
     )
-    assert (anywhere.precision, anywhere.recall) == (0.75, 0.75)
+
+
+def test_signature_rule_outcome(frame: pd.DataFrame) -> None:
+    # Signature rows: r1, r5 (positive) and r9 (negative). r7 and r8 are positives left
+    # out: r7 moves 7 of 10, r8 moves 0 over 0.
+    anywhere = profiling.signature_rule_outcome(frame)
+    # Negatives: r2, r3, r4, r6, r9; only r9 is flagged.
+    assert anywhere == RuleOutcome(
+        flagged_rows=3, true_positives=2, false_positives=1, false_negatives=2, true_negatives=4
+    )
+    assert (anywhere.precision, anywhere.recall) == (pytest.approx(2 / 3), 0.5)
     # Restricted to TRANSFER and CASH_OUT, the legitimate PAYMENT r9 drops out.
     restricted = profiling.signature_rule_outcome(frame, types=("TRANSFER", "CASH_OUT"))
     assert restricted == RuleOutcome(
-        flagged_rows=3, true_positives=3, false_positives=0, false_negatives=1
+        flagged_rows=2, true_positives=2, false_positives=0, false_negatives=2, true_negatives=5
     )
-    assert (restricted.precision, restricted.recall) == (1.0, 0.75)
-    nothing = RuleOutcome(flagged_rows=0, true_positives=0, false_positives=0, false_negatives=0)
+    assert (restricted.precision, restricted.recall) == (1.0, 0.5)
+    nothing = RuleOutcome(
+        flagged_rows=0, true_positives=0, false_positives=0, false_negatives=0, true_negatives=0
+    )
     assert math.isnan(nothing.precision)
     assert math.isnan(nothing.recall)
 
@@ -401,3 +415,116 @@ def test_destination_prefix_by_type(frame: pd.DataFrame) -> None:
         "PAYMENT": {"C": 0, "M": 2},
         "TRANSFER": {"C": 3, "M": 0},
     }
+
+
+# --- Weekly structure ------------------------------------------------------------------------
+
+
+def _steps_frame(steps: list[int]) -> pd.DataFrame:
+    return pd.DataFrame({"step": np.array(steps, dtype="int16")})
+
+
+def test_rows_per_step_by_day_of_cycle() -> None:
+    # Steps 1..167 (days 0..6) with one row each, except: day 1 (steps 24..47) has two
+    # rows per step, and step 100 (day 4) has none. Day 0 has 23 steps: 1..23.
+    steps = [step for step in range(1, 168) if step != 100]
+    steps += list(range(24, 48))
+    table = profiling.rows_per_step_by_day_of_cycle(_steps_frame(steps), period_last_step=167)
+    assert table.to_dict(orient="index") == {
+        0: {"days": 1, "steps": 23, "rows": 23, "mean_rows_per_step": 1.0},
+        1: {"days": 1, "steps": 24, "rows": 48, "mean_rows_per_step": 2.0},
+        2: {"days": 1, "steps": 24, "rows": 24, "mean_rows_per_step": 1.0},
+        3: {"days": 1, "steps": 24, "rows": 24, "mean_rows_per_step": 1.0},
+        4: {"days": 1, "steps": 24, "rows": 23, "mean_rows_per_step": 23 / 24},
+        5: {"days": 1, "steps": 24, "rows": 24, "mean_rows_per_step": 1.0},
+        6: {"days": 1, "steps": 24, "rows": 24, "mean_rows_per_step": 1.0},
+    }
+
+
+def test_daily_volume_autocorrelation() -> None:
+    # Period ends at step 95. Day 0 (steps 0..23) is incomplete because the first step is
+    # 1, so its 5 rows are left out. Days 1, 2 and 3 hold 1, 3 and 2 rows.
+    steps = [1] * 5 + [30] + [50] * 3 + [80] * 2
+    result = profiling.daily_volume_autocorrelation(
+        _steps_frame(steps), lags=(1, 2), period_last_step=95
+    )
+    assert result.daily_rows.to_dict() == {1: 1.0, 2: 3.0, 3: 2.0}
+    # Deviations from the mean 2: (-1, 1, 0); squared sum 2.
+    # Lag 1: (-1)(1) + (1)(0) = -1 -> -0.5. Lag 2: (-1)(0) = 0 -> 0.
+    assert result.autocorrelation.to_dict() == pytest.approx({1: -0.5, 2: 0.0})
+    assert result.band == pytest.approx(2 / math.sqrt(3))
+
+
+def test_daily_autocorrelation_peaks_at() -> None:
+    def result(autocorrelation: dict[int, float], band: float) -> profiling.DailyAutocorrelation:
+        return profiling.DailyAutocorrelation(
+            daily_rows=pd.Series(dtype=float), autocorrelation=pd.Series(autocorrelation), band=band
+        )
+
+    assert result({1: 0.2, 7: 0.6, 8: 0.1}, band=0.5).peaks_at(7)
+    # Above the band but not the largest lag.
+    assert not result({1: 0.8, 7: 0.6, 8: 0.1}, band=0.5).peaks_at(7)
+    # The largest lag but inside the band.
+    assert not result({1: 0.2, 7: 0.6, 8: 0.1}, band=0.7).peaks_at(7)
+
+
+# --- For the figures of notebook 01 ------------------------------------------------------------
+
+
+def test_sample_with_all_positives(frame: pd.DataFrame) -> None:
+    # Positives: r1, r5, r7, r8 (index 0, 4, 6, 7); negatives: index 1, 2, 3, 5, 8.
+    sample = profiling.sample_with_all_positives(frame, negative_rows=2)
+    assert sample.index[:4].tolist() == [0, 4, 6, 7]
+    negatives = sample.index[4:].tolist()
+    assert len(negatives) == 2
+    assert set(negatives) <= {1, 2, 3, 5, 8}
+    # The same seed draws the same rows; asking for more negatives than exist fails.
+    again = profiling.sample_with_all_positives(frame, negative_rows=2)
+    assert again.index.tolist() == sample.index.tolist()
+    with pytest.raises(ValueError, match="6 negative rows requested, 5 available"):
+        profiling.sample_with_all_positives(frame, negative_rows=6)
+
+
+def test_log_histogram_by_label() -> None:
+    frame = pd.DataFrame(
+        {
+            "amount": [0.0, 0.5, 5.0, 50.0, 100.0, 0.0, 20.0],
+            "isFraud": np.array([0, 0, 0, 0, 1, 1, 1], dtype="int8"),
+        }
+    )
+    histogram = profiling.log_histogram_by_label(frame, "amount", bins_per_decade=1)
+    # Smallest positive 0.5 -> 10^-1; largest 100 -> 10^2; one bin per power of ten.
+    assert histogram.edges.tolist() == pytest.approx([0.1, 1.0, 10.0, 100.0])
+    # Bins [0.1, 1), [1, 10), [10, 100]: 0.5 | 5 | 50, 100, 20.
+    assert histogram.counts.to_dict(orient="list") == {0: [1, 1, 1], 1: [0, 0, 2]}
+    assert histogram.shares[0].tolist() == pytest.approx([1 / 3, 1 / 3, 1 / 3])
+    assert histogram.shares[1].tolist() == pytest.approx([0.0, 0.0, 1.0])
+    assert histogram.zeros.to_dict() == {0: 1, 1: 1}
+    # Label 0 has 4 rows, label 1 has 3.
+    assert histogram.zero_shares.to_dict() == pytest.approx({0: 0.25, 1: 1 / 3})
+    with pytest.raises(ValueError, match="negative values"):
+        profiling.log_histogram_by_label(frame.assign(amount=-frame["amount"]), "amount")
+
+
+def test_label_rate_by_hour() -> None:
+    # Steps 1 and 25 are hour 1; steps 24 and 48 are hour 0; step 13 is hour 13, which a
+    # 12-hour clock would fold into hour 1.
+    frame = pd.DataFrame(
+        {
+            "step": np.array([1, 25, 24, 48, 13], dtype="int16"),
+            "isFraud": np.array([1, 0, 1, 1, 0], dtype="int8"),
+        }
+    )
+    table = profiling.label_rate_by_hour(frame)
+    assert table.to_dict(orient="index") == {
+        0: {"rows": 2, "positives": 2, "rate": 1.0},
+        1: {"rows": 2, "positives": 1, "rate": 0.5},
+        13: {"rows": 1, "positives": 0, "rate": 0.0},
+    }
+
+
+def test_occurrence_distribution(frame: pd.DataFrame) -> None:
+    # nameDest: C90 three times, six other values once.
+    assert profiling.occurrence_distribution(frame, "nameDest").to_dict() == {1: 6, 3: 1}
+    # nameOrig: C1 twice, seven other values once.
+    assert profiling.occurrence_distribution(frame, "nameOrig").to_dict() == {1: 7, 2: 1}

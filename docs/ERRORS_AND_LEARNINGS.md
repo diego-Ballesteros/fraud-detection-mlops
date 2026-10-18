@@ -205,6 +205,11 @@ correlativo.
   verifica Spearman con empates contra un valor calculado a mano, que se distingue del de
   Pearson, así que volver a `method="spearman"` falla en CI mientras scipy no esté en el
   grafo.
+- **Nota de estado (2026-10-18), segunda:** scipy entró al grafo en la fase 1, no en la 2:
+  llegó con scikit-learn (scipy 1.17.1 en el lock). Desde entonces, volver a
+  `method="spearman"` ya no falla: calcula el mismo valor y el test pasa. El test sigue
+  protegiendo la cifra, pero ya no detecta la dependencia oculta, y la nota anterior dejó
+  de ser cierta en esa parte.
 
 ### ERR-008 · Una lista de inclusión vacía significa "todas las columnas" · 2026-10-18
 
@@ -228,3 +233,58 @@ correlativo.
   decir "nada".
 - **Referencias:** `src/fraud_detection/data/validator.py`, en la lectura con dtypes
   declarados.
+- **Nota de estado (2026-10-18):** corregido también del lado del loader, en la misma
+  fase. `loader.read_raw_csv` levanta `ValueError` ante una lista vacía, con test en
+  `tests/test_loader.py`. Una lista vacía que significa "todas" reabría ERR-005 por el
+  costado: columnas no declaradas con tipos inferidos.
+
+### ERR-009 · Un arnés de mutación leyó "no corrió ningún test" como "el mutante sobrevivió" · 2026-10-18
+
+- **Síntoma:** el arnés de mutación del Ejecutor (ad hoc, no versionado) reportó 0 de 12
+  mutantes detectados sobre el código de features, baseline y loader. Todos "sobrevivían".
+- **Mecanismo:** dos piezas, y ninguna avisa.
+  - La plantilla del plugin de pytest era una cadena no cruda con `"\r\n"` adentro. Al
+    formatearse, el plugin generado quedó con un salto de línea real dentro de una cadena:
+    un `SyntaxError`. pytest falló al cargar el plugin y no ejecutó ningún test.
+  - El arnés decidía "detectado" buscando líneas `FAILED` en la salida. Sin tests
+    ejecutados no hay líneas `FAILED`, y la ausencia se leyó como supervivencia.
+- **Instancia relacionada, del mismo turno:** al generar un archivo desde un comando de
+  shell, un `\\n` llegó como `\n` y rompió `scripts/prepare_data.py` con saltos de línea
+  dentro de cadenas. Ruff lo detectó antes de cualquier corrida.
+- **Cómo se detectó:** 0 de 12 era inverosímil frente a una suite que en el turno anterior
+  detectó 17 de 17. Se leyó la plantilla en bytes antes de tocar ningún test.
+- **Corrección:** el arnés se reescribió con plantilla cruda. Ahora corre primero un
+  control sin mutación, que tiene que ejecutar los tests y pasarlos, y trata como "error
+  del arnés" toda corrida en la que pytest no ejecutó tests. Con eso: 12 de 12 detectados.
+- **Defensa:** nivel 3: está escrito aquí. El arnés no está versionado.
+- **Aprendizaje:** un instrumento que puede fallar sin producir la señal que busca convierte
+  su propio fallo en un resultado. Es `docs/METHODOLOGY.md`, sección 7.6, otra vez: la
+  ausencia de evidencia de fallo se lee igual que la evidencia de éxito, salvo que haya un
+  control que pruebe que el instrumento corrió.
+- **Referencias:** ERR-007, por la otra vez que un fallo se manifestó solo al ejecutar.
+
+### ERR-010 · El ejecutor de notebooks corrompió los acentos y todas las verificaciones dieron verde · 2026-10-18
+
+- **Síntoma:** `uv run jupyter execute --inplace notebooks/*.ipynb` salió con código 0, con
+  contadores consecutivos, cero errores, cero salidas a stderr y cero rutas absolutas. Pero
+  las figuras decían "LegÃtima" y "AutocorrelaciÃ³n": el archivo guardado tenía 214 marcas
+  de mojibake y ninguna palabra acentuada correcta.
+- **Mecanismo:** `nbclient/cli.py` (0.11.0) abre el notebook con `input_path.open()`, sin
+  `encoding`. Sin el modo UTF-8, Python en Windows usa la codificación local, que en esta
+  máquina es cp1252. Los bytes UTF-8 se decodifican como cp1252, el kernel ejecuta las
+  cadenas corruptas, y `nbformat.write` guarda la corrupción en UTF-8. Ninguna celda falla:
+  una cadena mal decodificada sigue siendo una cadena válida.
+- **Cómo se detectó:** mirando las figuras; ninguna verificación automática lo vio. Los
+  controles del ejecutor (un notebook que debe pasar y otro que debe fallar) eran solo ASCII.
+- **Corrección:** la tarea `notebooks` del Taskfile fija `PYTHONUTF8=1`. Un tercer control,
+  un notebook que afirma el valor de una cadena acentuada, falla sin el modo UTF-8
+  (`AssertionError: 'Leg\xc3\xadtima'`) y pasa con él, y el archivo guardado conserva el
+  carácter.
+- **Defensa:** nivel 1 para la tarea, porque su entorno fija la variable. Nivel 3 para quien
+  ejecute `jupyter execute` a mano sin ella: está escrito aquí y en el Taskfile, y ningún
+  test lo detecta.
+- **Aprendizaje:** los controles de un arnés tienen que cubrir la clase de dato que el arnés
+  procesa; un control solo ASCII no prueba nada sobre un texto en español. Es un sexto caso
+  del verde en falso de `docs/METHODOLOGY.md`, sección 7.6.
+- **Referencias:** `Taskfile.yml`, tarea `notebooks`; `docs/DEPENDENCIES.md`, fila de
+  `nbclient`; ERR-009.

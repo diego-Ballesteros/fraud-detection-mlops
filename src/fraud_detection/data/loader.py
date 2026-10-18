@@ -132,9 +132,14 @@ def read_raw_csv(csv_path: Path, columns: Sequence[str] = EXPECTED_COLUMNS) -> p
         One column per requested name, in the requested order.
 
     Raises:
+        ValueError: If no column is requested.
         pyarrow.ArrowInvalid: If a value cannot be converted to its column's type, or a
             requested column is not in the file.
     """
+    if not columns:
+        # pyarrow reads an empty include list as every column, undeclared ones included,
+        # with inferred types (docs/ERRORS_AND_LEARNINGS.md, ERR-008).
+        raise ValueError("No column requested: an empty list would read every column")
     convert_options = pa_csv.ConvertOptions(
         column_types={name: _arrow_read_type(COLUMNS[name].dtype) for name in columns},
         include_columns=list(columns),

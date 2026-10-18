@@ -104,6 +104,12 @@ def test_out_of_range_integer_is_rejected_not_wrapped(tmp_path: Path) -> None:
         loader.read_raw_csv(path)
 
 
+def test_an_empty_column_list_reads_nothing(synthetic_csv: Path) -> None:
+    # pyarrow alone would read every column, with inferred types (ERR-008).
+    with pytest.raises(ValueError, match="No column requested"):
+        loader.read_raw_csv(synthetic_csv, [])
+
+
 def test_out_of_domain_type_is_refused_not_nulled(tmp_path: Path) -> None:
     row = SYNTHETIC_ROWS[0]
     path = _write_csv(tmp_path / "domain.csv", [(row[0], "REFUND", *row[2:])])

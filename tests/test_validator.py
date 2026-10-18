@@ -87,10 +87,18 @@ def test_a_check_that_cannot_run_is_skipped_never_passed(
     assert _checks(report, Status.SKIPPED) == {
         "reference domains",
         "reference nulls",
+        "reference non-negative",
         "production domains",
         "production nulls",
+        "production non-negative",
         "rows:periods",
     }
+
+    # An unreadable money column: its non-negativity cannot be checked, so it is skipped.
+    bad_amount = "1,PAYMENT,abc,C1,170136.0,160296.36,M1,0.0,0.0,0,0"
+    report = validator.validate_raw_csv(_write(tmp_path / "bad_amount.csv", [HEADER, bad_amount]))
+    assert "reference non-negative:amount" in _checks(report, Status.SKIPPED)
+    assert not any(c.endswith("non-negative:amount") for c in _checks(report, Status.PASSED))
 
     # Without a single declared column, or with every declared column unreadable, nothing
     # can be read, and nothing passes.
@@ -138,6 +146,7 @@ def test_a_clean_file_passes_every_check_and_skips_none(tmp_path: Path) -> None:
         "production domain:isFraud",
         "production domain:isFlaggedFraud",
         "production nulls",
+        "production non-negative",
     }
     report.raise_if_blocking()
 
@@ -156,6 +165,26 @@ def test_missing_values_are_counted_on_reference_and_only_flagged_on_production(
     assert failed["dtypes:isFraud"].startswith("parsed, but held as float64 instead of int8")
     assert failed["reference nulls:isFraud"] == "1 missing values; the schema admits none"
     assert failed["production nulls:amount"] == "no forbidden missing values: False"
+
+
+def test_negative_money_is_counted_on_reference_and_only_flagged_on_production(
+    tmp_path: Path,
+) -> None:
+    lines = [
+        HEADER,
+        "1,TRANSFER,-5.0,C1,181.0,0.0,C2,0.0,0.0,1,0",  # reference: negative amount
+        "2,CASH_OUT,9.0,C3,-1.0,0.0,C4,0.0,0.0,0,0",  # reference: negative origin balance
+        "401,TRANSFER,7.0,C5,7.0,0.0,C6,-1.0,0.0,1,0",  # production: negative destination
+    ]
+    report = validator.validate_raw_csv(_write(tmp_path / "negative.csv", lines))
+    failed = {f.check: f.detail for f in report.findings if f.status is Status.FAILED}
+    assert failed["reference non-negative:amount"] == "1 negative values; the schema admits none"
+    assert failed["reference non-negative:oldbalanceOrg"] == (
+        "1 negative values; the schema admits none"
+    )
+    assert failed["production non-negative:oldbalanceDest"] == "no negative values: False"
+    # newbalanceOrig and newbalanceDest are not declared non-negative: never checked.
+    assert not [check for check in failed if "newbalance" in check]
 
 
 def test_check_columns_names_each_kind_of_problem() -> None:

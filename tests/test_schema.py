@@ -66,3 +66,8 @@ def test_exposed_objects_are_immutable() -> None:
         spec.availability = Availability.PRE_TRANSACTION
     with pytest.raises(TypeError):
         schema.TRANSACTION_TYPES[0] = "REFUND"
+
+
+def test_the_non_negative_columns_are_the_three_model_money_columns() -> None:
+    non_negative = {spec.name for spec in schema.COLUMN_SPECS if spec.non_negative}
+    assert non_negative == {"amount", "oldbalanceOrg", "oldbalanceDest"}

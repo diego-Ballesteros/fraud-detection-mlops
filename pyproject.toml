@@ -7,10 +7,12 @@ requires-python = ">=3.11,<3.12"
 # Floors are the minimum the project needs, not the latest release on the day `uv add` ran,
 # and sit on a major version where the API matters (docs/adr/0003-dependency-bounds.md).
 dependencies = [
+    "matplotlib>=3.7",
     "pandas>=2.2,<3",
     "pyarrow>=16",
     "pydantic>=2.3",
     "pydantic-settings>=2.2",
+    "scikit-learn>=1.2",
 ]
 
 [build-system]
@@ -78,6 +80,8 @@ addopts = ["-ra", "--strict-markers", "--cov=fraud_detection", "--cov-report=ter
 dev = [
     "ipykernel>=7.0",
     "mypy>=2.0",
+    "nbclient>=0.11",
+    "nbformat>=5.0",
     "pre-commit>=4.0",
     "pytest>=9.0",
     "pytest-cov>=7.0",

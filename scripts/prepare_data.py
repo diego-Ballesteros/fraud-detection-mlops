@@ -21,6 +21,7 @@ import pandas as pd
 
 from fraud_detection.config import settings
 from fraud_detection.data import loader, profiling, validator
+from fraud_detection.models.baseline import BASELINE_TYPES
 
 PRIOR_INFERRED_LINE_COUNT: Final[int] = 6_362_621
 """Line count inferred in an earlier turn, never measured (docs/ERRORS_AND_LEARNINGS.md,
@@ -204,12 +205,12 @@ def _report_extra(reference: pd.DataFrame) -> None:
     window = by_step.positives_per_step.iloc[:PERIODICITY_WINDOW]
     print(f"positives per step, first {PERIODICITY_WINDOW} steps: {window.tolist()}")
 
-    _section("EXTRA C. SUSPECTED: oldbalanceOrg WITH amount. amount == oldbalanceOrg (reference)")
-    print(f"equal within the declared tolerance, {profiling.BALANCE_TOLERANCE}")
-    _show(profiling.amount_equals_origin_balance(reference))
+    _section("EXTRA C. THE SIGNATURE: amount > 0 and amount == oldbalanceOrg (reference period)")
+    print("signature: features.builder.amount_equals_origin_balance, the single definition")
+    _show(profiling.signature_by_type(reference))
     rules = {
-        "amount == oldbalanceOrg": None,
-        "amount == oldbalanceOrg and type in (TRANSFER, CASH_OUT)": ("TRANSFER", "CASH_OUT"),
+        "signature": None,
+        f"signature and type in {BASELINE_TYPES} (the baseline)": BASELINE_TYPES,
     }
     for name, types in rules.items():
         outcome = profiling.signature_rule_outcome(reference, types=types)
@@ -223,6 +224,18 @@ def _report_extra(reference: pd.DataFrame) -> None:
 
     _section("EXTRA D. FIRST CHARACTER OF nameDest PER TRANSACTION TYPE (reference period)")
     _show(profiling.destination_prefix_by_type(reference))
+
+    _section("EXTRA E. WEEKLY STRUCTURE: DOES day_of_week CARRY ANYTHING? (reference period)")
+    print("mean rows per step by (step // 24) % 7:")
+    _show(profiling.rows_per_step_by_day_of_cycle(reference))
+    weekly = profiling.daily_volume_autocorrelation(reference)
+    print(f"\nrows per complete day ({len(weekly.daily_rows)} complete days):")
+    _show(weekly.daily_rows.astype(int))
+    print("\nautocorrelation of the daily volume:")
+    _show(weekly.autocorrelation)
+    print(f"band 2/sqrt(n): {weekly.band:.6f}")
+    print("criterion, fixed before measuring: lag 7 is the largest and above the band")
+    print(f"criterion holds, so day_of_week enters: {weekly.peaks_at(7)}")
 
 
 def main() -> int:

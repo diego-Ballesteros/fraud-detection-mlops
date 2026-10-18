@@ -156,6 +156,7 @@ Criterio: **no es la dificultad, es el costo del error.**
 |---|---|
 | `README.md` | El entregable. Qué es el proyecto, para el evaluador y para un tercero. También cumple el contrato de comportamiento del sistema: qué hace y qué lo restringe |
 | `docs/DATA_DICTIONARY.md` | Contrato de datos: columnas, tipos, rangos, features derivadas, y qué columnas están prohibidas y por qué |
+| `docs/DEPENDENCIES.md` | La tabla viva de las dependencias directas y sus pisos, con la procedencia de cada uno. Se lee antes de cualquier `uv add`, y se actualiza en el mismo turno |
 | `docs/MODEL_CARD.md` | Qué hace el modelo, con qué datos, qué NO debe usarse para, y sus limitaciones |
 | `docs/adr/` | Una entrada por decisión, con su razón. **Nunca se corrige hacia atrás** |
 | `docs/analysis/` | Mediciones de registro, cada una **reproducible por un script del repositorio**. Sus cifras se citan desde los ADR. No se reescriben hacia atrás: se les agrega una nota de estado fechada |
@@ -335,6 +336,16 @@ falsos antes de que alguien lo mirara.
 
 **Defensa:** todo script que produce una cifra que va a un documento tiene tests con casos
 donde el valor esperado se calcula a mano.
+
+Todo arnés de verificación lleva una corrida que debe pasar y una que debe fallar. Sin las
+dos, el arnés no está verificado: en este proyecto el instrumento reportó verde en falso en
+un detector de grietas, en dos patrones de grep, en un verificador de ruedas y en un arnés de
+mutación, y en todos los casos el síntoma fue indistinguible de un resultado bueno.
+Y hay una clase que ningún arnés atrapa: cuando la entrada está corrompida, una cadena de
+chequeos automáticos es coherentemente verde. Los acentos del notebook 01 se corrompieron
+entero y los seis chequeos pasaron, porque todos leían el mismo archivo mal decodificado. El
+único detector fue mirar las figuras. Por eso cada notebook y cada figura los mira una persona
+antes de cerrar una fase.
 
 ---
 

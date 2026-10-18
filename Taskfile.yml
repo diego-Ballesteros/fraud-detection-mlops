@@ -25,6 +25,21 @@ tasks:
     cmds:
       - uv run pytest -v
 
+  # A third party must be able to reproduce the notebooks; a command that only existed in
+  # one working session is reproducible by nobody (docs/DEPENDENCIES.md, nbclient).
+  notebooks:
+    desc: >-
+      Local only, not CI: needs data/, which the CI runner does not have.
+      Runs every notebook in notebooks/ top to bottom in a fresh kernel, saves the outputs
+      in place, and fails if any cell raises
+    # nbclient's CLI opens a notebook with the platform's default encoding. On Windows that
+    # is cp1252, which corrupts every non-ASCII character and saves the corruption
+    # (docs/ERRORS_AND_LEARNINGS.md, ERR-010). UTF-8 mode makes that default UTF-8.
+    env:
+      PYTHONUTF8: "1"
+    cmds:
+      - uv run jupyter execute --inplace notebooks/*.ipynb
+
   check:
     desc: Run lint, typecheck and test in sequence (same steps as CI)
     cmds:

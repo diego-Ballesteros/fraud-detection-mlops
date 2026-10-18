@@ -343,6 +343,48 @@ def check_nulls(frame: pd.DataFrame, period: Period = Period.REFERENCE) -> list[
     return findings
 
 
+def check_non_negative(frame: pd.DataFrame, period: Period = Period.REFERENCE) -> list[Finding]:
+    """Check that no column the schema declares non-negative holds a negative value.
+
+    Missing values are left to ``check_nulls``.
+
+    Args:
+        frame: Rows of one period.
+        period: Period of the rows. On production, a finding only says whether negative
+            values are present; on reference, it also counts them.
+
+    Returns:
+        One failed finding per column with negative values, one skipped finding per such
+        column that could not be read, and one passed finding for the rest.
+    """
+    findings: list[Finding] = []
+    clean = []
+    for spec in COLUMN_SPECS:
+        if not spec.non_negative:
+            continue
+        check = f"{period.value} non-negative:{spec.name}"
+        if spec.name not in frame.columns:
+            findings.append(_skipped(check, "column could not be read"))
+            continue
+        negative = frame[spec.name] < 0
+        if period is Period.PRODUCTION:
+            if negative.any():
+                findings.append(_boolean(check, "no negative values", False))
+            else:
+                clean.append(spec.name)
+        elif count := int(negative.sum()):
+            findings.append(_failed(check, f"{count} negative values; the schema admits none"))
+        else:
+            clean.append(spec.name)
+    if clean:
+        check = f"{period.value} non-negative"
+        if period is Period.PRODUCTION:
+            findings.append(_boolean(check, "no negative values in the remaining columns", True))
+        else:
+            findings.append(_passed(check, f"no negative values in {len(clean)} columns"))
+    return findings
+
+
 def check_parsed_rows(csv_data_lines: int, parsed_rows: int) -> Finding:
     """Check that the parser returned one row per data line of the file.
 
@@ -397,7 +439,11 @@ def validate_raw_csv(csv_path: Path) -> ValidationReport:
     dtype_findings, frame = _read_checking_dtypes(csv_path, present)
     findings.extend(dtype_findings)
 
-    period_checks = [f"{period.value} {kind}" for period in Period for kind in ("domains", "nulls")]
+    period_checks = [
+        f"{period.value} {kind}"
+        for period in Period
+        for kind in ("domains", "nulls", "non-negative")
+    ]
     if frame is None:
         reason = "no column could be read"
         findings.extend(
@@ -420,5 +466,6 @@ def validate_raw_csv(csv_path: Path) -> ValidationReport:
     for rows, period in ((reference, Period.REFERENCE), (production, Period.PRODUCTION)):
         findings.extend(check_domains(rows, period))
         findings.extend(check_nulls(rows, period))
+        findings.extend(check_non_negative(rows, period))
     findings.append(check_periods(len(frame), len(reference), len(production)))
     return ValidationReport(source=csv_path.name, findings=tuple(findings))
