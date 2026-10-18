@@ -92,6 +92,10 @@ correlativo.
   medición al citarla.
 - **Referencias:** ERR-001, por la medición de tamaños del CSV que originó la inferencia
   de la instancia 2.
+- **Nota de estado (2026-10-18):** la instancia 2 quedó medida en la fase 1 con
+  `scripts/prepare_data.py`. El CSV en disco tiene 6.362.621 bytes `\n`, los 6.362.621
+  precedidos por `\r`, y ningún `\r` suelto. La inferencia era correcta, y sigue siendo
+  cierto que no estaba medida cuando se citó.
 
 ### ERR-003 · La resolución elige en silencio un paquete sin rueda para nuestra plataforma · 2026-10-18
 
@@ -129,3 +133,164 @@ correlativo.
   a la instrucción misma.
 - **Corrección:** el Arquitecto envió la continuación, con el texto exacto de la frase.
 - **Referencias:** ADR 0003, por la frase que llegó cortada.
+
+### ERR-005 · pandas tipa en silencio: enteros que desbordan y categorías que se vuelven nulos · 2026-10-18
+
+- **Síntoma:** ninguno visible, y por eso cuenta. Medido con pandas 2.3.3 antes de escribir
+  el loader: `pd.read_csv(..., dtype={"a": "int8"})` leyó `300` como `44`, y
+  `dtype={"c": "int16"}` leyó `40000` como `-25536`, sin error ni advertencia, con el motor
+  C y con el motor pyarrow. Con `dtype=CategoricalDtype(categories=[...])`, un valor fuera
+  de las categorías quedó como `NaN`, también sin aviso.
+- **Mecanismo:** el valor resultante es el original módulo 2^n (300 − 256 = 44;
+  40000 − 65536 = −25536): una truncación en complemento a dos, sin verificación de rango.
+  En qué punto de pandas ocurre no quedó determinado. En la categórica, todo valor ajeno a
+  las categorías fijadas se convierte en nulo: es una imputación silenciosa
+  (`docs/METHODOLOGY.md`, sección 7.1).
+- **Cómo se detectó:** un sondeo previo al código, que buscaba específicamente las
+  conversiones capaces de corromper un dato sin fallar.
+- **Corrección:** el CSV se parsea con `pyarrow.csv` y un tipo explícito por columna, que
+  rechaza `300` en `int8` con un `ArrowInvalid` que nombra la columna. `type` se lee con
+  categorías abiertas, y las declaradas se aplican después de validar el dominio, con una
+  guarda que se niega a crear nulos.
+- **Defensa:** nivel 2 de `docs/METHODOLOGY.md`, sección 6.5: dos tests de
+  `tests/test_loader.py`, uno para el entero fuera de rango y otro para el tipo fuera de
+  dominio.
+- **Aprendizaje:** un dtype explícito no es un dtype verificado. Un entero angosto afirma un
+  rango, y alguien tiene que comprobarlo.
+- **Referencias:** `src/fraud_detection/data/loader.py`, en el docstring del módulo.
+
+### ERR-006 · `astype` a una categórica no ordenada no reordena, y el síntoma se atribuyó al parquet · 2026-10-18
+
+- **Síntoma:** el test de dtypes del parquet falló: las categorías de `type` volvían en
+  orden de aparición (`PAYMENT`, `TRANSFER`, …) y no en el declarado (`CASH_IN`,
+  `CASH_OUT`, …). La comparación de dtypes con `==` había pasado.
+- **Mecanismo:** para pandas, dos categóricas no ordenadas con las mismas categorías son
+  iguales aunque el orden difiera, y `Series.astype(dtype)` no hace nada cuando el dtype
+  destino es igual al actual. Medido con pandas 2.3.3: `astype` deja
+  `['TRANSFER', 'PAYMENT', 'CASH_IN']` intacto, y `cat.set_categories` lo lleva a
+  `['CASH_IN', 'PAYMENT', 'TRANSFER']` conservando los valores.
+- **Error de diagnóstico previo:** en el sondeo inicial, el mismo síntoma se atribuyó a la
+  ida y vuelta por parquet, y así se informó durante el turno. Era falso: el sondeo hacía
+  un `astype` antes de escribir, y ese `astype` nunca había reordenado. Un segundo sondeo,
+  que construía la categórica desde cero, mostró que el parquet sí conserva el orden; la
+  contradicción entre los dos no se investigó en el momento.
+- **Cómo se detectó:** el test, que compara el orden de las categorías por separado
+  precisamente porque `==` no lo compara.
+- **Corrección:** `apply_declared_dtypes` recodifica con `cat.set_categories`.
+- **Defensa:** nivel 2: la aserción de orden en el test de dtypes de `tests/test_loader.py`.
+- **Aprendizaje:** dos sondeos que se contradicen son un hallazgo, no ruido. Y la igualdad
+  de dos dtypes no prueba que sean el mismo dtype.
+- **Referencias:** ERR-005, por la guarda contra nulos que comparte la misma función.
+
+### ERR-007 · Una dependencia opcional de pandas falla solo al llamarse · 2026-10-18
+
+- **Síntoma:** `scripts/prepare_data.py` completó trece mediciones y falló en la catorce con
+  `ModuleNotFoundError: No module named 'scipy'`, desde
+  `DataFrame.corrwith(..., method="spearman")`.
+- **Mecanismo:** pandas importa scipy dentro del método, en el momento de la llamada, no al
+  importar pandas. scipy no es dependencia del proyecto. ruff y mypy no pueden verlo, y
+  ningún test ejecuta las funciones de medición.
+- **Cómo se detectó:** la corrida completa del script.
+- **Corrección:** Spearman se calcula por su definición, como Pearson sobre rangos
+  promedio, sin scipy. Se verificó contra un caso con empates calculado a mano (3/√18).
+- **Defensa:** ninguna automática: nivel 3. Las funciones de medición no tienen tests en
+  esta fase, y es la defensa que falta (`docs/METHODOLOGY.md`, sección 7.6). Además, cuando
+  entre scikit-learn en la fase 2, scipy llegará como dependencia transitiva y el síntoma
+  desaparecerá sin que nadie lo haya decidido.
+- **Aprendizaje:** que pandas importe no garantiza que todos sus métodos corran.
+- **Referencias:** `src/fraud_detection/data/profiling.py`, en el docstring de la función
+  de correlación.
+- **Nota de estado (2026-10-18):** la defensa subió a nivel 2 en la misma fase.
+  `tests/test_profiling.py` tiene un test por función de medición. El de correlación
+  verifica Spearman con empates contra un valor calculado a mano, que se distingue del de
+  Pearson, así que volver a `method="spearman"` falla en CI mientras scipy no esté en el
+  grafo.
+- **Nota de estado (2026-10-18), segunda:** scipy entró al grafo en la fase 1, no en la 2:
+  llegó con scikit-learn (scipy 1.17.1 en el lock). Desde entonces, volver a
+  `method="spearman"` ya no falla: calcula el mismo valor y el test pasa. El test sigue
+  protegiendo la cifra, pero ya no detecta la dependencia oculta, y la nota anterior dejó
+  de ser cierta en esa parte.
+
+### ERR-008 · Una lista de inclusión vacía significa "todas las columnas" · 2026-10-18
+
+- **Síntoma:** ninguno visible. Medido antes de corregir: `read_raw_csv` con una lista
+  vacía de columnas, sobre un CSV con encabezado `foo,bar`, devolvió las dos columnas, con
+  dtypes inferidos `int64` y `string`.
+- **Mecanismo:** en `pyarrow.csv.ConvertOptions`, un `include_columns` vacío significa
+  "todas las columnas", no "ninguna". El validador lee las columnas declaradas que aparecen
+  en el encabezado. Si no aparece ninguna, la lista vacía invierte el significado, y el
+  lector infiere tipos sobre columnas que nadie declaró: lo que el loader dice no hacer
+  nunca.
+- **Cómo se detectó:** al escribir los tests del validador, revisando el camino en que no
+  hay nada que leer. Se confirmó con la medición antes de corregir.
+- **Corrección:** el validador no lee nada cuando ninguna columna declarada está presente,
+  y los chequeos que dependen de la lectura salen omitidos.
+- **Defensa:** nivel 2: el test del validador que exige que un chequeo que no puede
+  ejecutarse salga omitido cubre un archivo sin columnas declaradas. `loader.read_raw_csv`
+  conserva el comportamiento con una lista vacía; quedó fuera del alcance del turno y se
+  reportó.
+- **Aprendizaje:** el caso vacío de un parámetro se prueba; "vacío" no siempre quiere
+  decir "nada".
+- **Referencias:** `src/fraud_detection/data/validator.py`, en la lectura con dtypes
+  declarados.
+- **Nota de estado (2026-10-18):** corregido también del lado del loader, en la misma
+  fase. `loader.read_raw_csv` levanta `ValueError` ante una lista vacía, con test en
+  `tests/test_loader.py`. Una lista vacía que significa "todas" reabría ERR-005 por el
+  costado: columnas no declaradas con tipos inferidos.
+- **Nota de estado (2026-10-18), segunda instancia:** `pre-commit run --files` con una lista
+  vacía cae a su modo por defecto: guarda los cambios no preparados en un stash y los
+  restaura. Ocurrió al pasarle `$(git ls-files --others)` cuando todos los archivos ya
+  estaban preparados. Es el mismo mecanismo que `include_columns=[]`: una colección vacía
+  significa "nada" para quien llama y "todo", o "el default", para la herramienta. La
+  defensa es pasar la lista explícita y verificar que no esté vacía antes de invocar.
+
+### ERR-009 · Un arnés de mutación leyó "no corrió ningún test" como "el mutante sobrevivió" · 2026-10-18
+
+- **Síntoma:** el arnés de mutación del Ejecutor (ad hoc, no versionado) reportó 0 de 12
+  mutantes detectados sobre el código de features, baseline y loader. Todos "sobrevivían".
+- **Mecanismo:** dos piezas, y ninguna avisa.
+  - La plantilla del plugin de pytest era una cadena no cruda con `"\r\n"` adentro. Al
+    formatearse, el plugin generado quedó con un salto de línea real dentro de una cadena:
+    un `SyntaxError`. pytest falló al cargar el plugin y no ejecutó ningún test.
+  - El arnés decidía "detectado" buscando líneas `FAILED` en la salida. Sin tests
+    ejecutados no hay líneas `FAILED`, y la ausencia se leyó como supervivencia.
+- **Instancia relacionada, del mismo turno:** al generar un archivo desde un comando de
+  shell, un `\\n` llegó como `\n` y rompió `scripts/prepare_data.py` con saltos de línea
+  dentro de cadenas. Ruff lo detectó antes de cualquier corrida.
+- **Cómo se detectó:** 0 de 12 era inverosímil frente a una suite que en el turno anterior
+  detectó 17 de 17. Se leyó la plantilla en bytes antes de tocar ningún test.
+- **Corrección:** el arnés se reescribió con plantilla cruda. Ahora corre primero un
+  control sin mutación, que tiene que ejecutar los tests y pasarlos, y trata como "error
+  del arnés" toda corrida en la que pytest no ejecutó tests. Con eso: 12 de 12 detectados.
+- **Defensa:** nivel 3: está escrito aquí. El arnés no está versionado.
+- **Aprendizaje:** un instrumento que puede fallar sin producir la señal que busca convierte
+  su propio fallo en un resultado. Es `docs/METHODOLOGY.md`, sección 7.6, otra vez: la
+  ausencia de evidencia de fallo se lee igual que la evidencia de éxito, salvo que haya un
+  control que pruebe que el instrumento corrió.
+- **Referencias:** ERR-007, por la otra vez que un fallo se manifestó solo al ejecutar.
+
+### ERR-010 · El ejecutor de notebooks corrompió los acentos y todas las verificaciones dieron verde · 2026-10-18
+
+- **Síntoma:** `uv run jupyter execute --inplace notebooks/*.ipynb` salió con código 0, con
+  contadores consecutivos, cero errores, cero salidas a stderr y cero rutas absolutas. Pero
+  las figuras decían "LegÃtima" y "AutocorrelaciÃ³n": el archivo guardado tenía 214 marcas
+  de mojibake y ninguna palabra acentuada correcta.
+- **Mecanismo:** `nbclient/cli.py` (0.11.0) abre el notebook con `input_path.open()`, sin
+  `encoding`. Sin el modo UTF-8, Python en Windows usa la codificación local, que en esta
+  máquina es cp1252. Los bytes UTF-8 se decodifican como cp1252, el kernel ejecuta las
+  cadenas corruptas, y `nbformat.write` guarda la corrupción en UTF-8. Ninguna celda falla:
+  una cadena mal decodificada sigue siendo una cadena válida.
+- **Cómo se detectó:** mirando las figuras; ninguna verificación automática lo vio. Los
+  controles del ejecutor (un notebook que debe pasar y otro que debe fallar) eran solo ASCII.
+- **Corrección:** la tarea `notebooks` del Taskfile fija `PYTHONUTF8=1`. Un tercer control,
+  un notebook que afirma el valor de una cadena acentuada, falla sin el modo UTF-8
+  (`AssertionError: 'Leg\xc3\xadtima'`) y pasa con él, y el archivo guardado conserva el
+  carácter.
+- **Defensa:** nivel 1 para la tarea, porque su entorno fija la variable. Nivel 3 para quien
+  ejecute `jupyter execute` a mano sin ella: está escrito aquí y en el Taskfile, y ningún
+  test lo detecta.
+- **Aprendizaje:** los controles de un arnés tienen que cubrir la clase de dato que el arnés
+  procesa; un control solo ASCII no prueba nada sobre un texto en español. Es un sexto caso
+  del verde en falso de `docs/METHODOLOGY.md`, sección 7.6.
+- **Referencias:** `Taskfile.yml`, tarea `notebooks`; `docs/DEPENDENCIES.md`, fila de
+  `nbclient`; ERR-009.

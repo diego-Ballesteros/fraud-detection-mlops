@@ -105,8 +105,12 @@ dashboard sobre los mismos artefactos cubre ambos.
 |---|---|
 | Registros | ~6,3 millones |
 | Columnas | 11 |
-| Clase positiva | ~0,13% (a verificar) |
+| Clase positiva | 0,0774% en referencia: 4.477 de 5.787.030 (medido el 2026-10-18) |
 | Ubicación | `data/raw/`, gitignoreado |
+
+La tasa del periodo completo no se mide hasta la fase 4, porque requiere producción.
+Tampoco se estima: con la cifra de referencia y un dato externo se podría despejar la de
+producción por resta, y una estimación influye las decisiones igual que una medición.
 
 ### El corte temporal es el regalo de este proyecto
 
@@ -238,6 +242,7 @@ fraud-detection-mlops/
 │   ├── ROADMAP.md
 │   ├── GIT_STRATEGY.md
 │   ├── DATA_DICTIONARY.md         ← requisito: incluye cuándo existe cada columna
+│   ├── DEPENDENCIES.md            ← dependencias y sus pisos; se lee antes de un uv add
 │   ├── MODEL_CARD.md
 │   ├── EVALUATION.md
 │   ├── ERRORS_AND_LEARNINGS.md
@@ -254,21 +259,9 @@ fraud-detection-mlops/
 │   ├── 03_interpretability.ipynb
 │   └── 04_monitoring.ipynb
 │
-├── src/fraud_detection/
-│   ├── config.py
-│   ├── data/          loader · schema · validator · preprocessor
-│   ├── features/      builder
-│   ├── models/        estimators · search_space · evaluation · tracking · registry
-│   ├── explain/       global_explain · local_explain
-│   └── monitoring/    drift · performance · report
+├── src/fraud_detection/           ← sus módulos y su estado: tabla de abajo
 │
-├── scripts/
-│   ├── run_preprocessing.py
-│   ├── run_training.py            ← el AutoML
-│   ├── run_prediction.py
-│   ├── run_leakage_check.py
-│   ├── run_interpretability.py
-│   └── run_monitoring.py          ← genera el reporte HTML
+├── scripts/                       ← sus scripts y su estado: tabla de abajo
 │
 ├── app/                           ← requisito explícito (Reto 2)
 │   └── monitoring_app.py
@@ -277,6 +270,52 @@ fraud-detection-mlops/
 ├── tests/
 └── .github/workflows/ci.yml
 ```
+
+### Módulos de `src/fraud_detection/`
+
+Un módulo es un archivo `.py` del paquete, sin contar los `__init__.py`. `existe` quiere decir
+que el archivo está en el repositorio; `fase N`, que está planificado para esa fase y todavía
+no existe. `tests/test_docs_consistency.py` verifica la tabla contra el código en las dos
+direcciones: un módulo sin fila, una fila `existe` sin archivo o una fila planificada cuyo
+archivo ya existe hacen fallar el test.
+
+| Paquete | Módulo | Estado |
+|---|---|---|
+| (raíz) | config | existe |
+| data | loader | existe |
+| data | schema | existe |
+| data | validator | existe |
+| data | profiling | existe |
+| features | builder | existe |
+| features | pipeline | existe |
+| models | baseline | existe |
+| models | estimators | fase 2 |
+| models | search_space | fase 2 |
+| models | evaluation | fase 2 |
+| models | tracking | fase 2 |
+| models | registry | fase 2 |
+| explain | global_explain | fase 3 |
+| explain | local_explain | fase 3 |
+| monitoring | drift | fase 4 |
+| monitoring | performance | fase 4 |
+| monitoring | report | fase 4 |
+
+### Scripts de `scripts/`
+
+Mismo vocabulario que la tabla de módulos: `existe` quiere decir que el archivo está en el
+repositorio; `fase N`, que está planificado para esa fase y todavía no existe.
+`tests/test_docs_consistency.py` verifica esta tabla contra la carpeta en las dos
+direcciones, con las mismas reglas.
+
+| Script | Qué hace | Estado |
+|---|---|---|
+| `prepare_data.py` | CSV → dos parquet, validación y mediciones | existe |
+| `run_training.py` | El AutoML | fase 2 |
+| `run_leakage_check.py` | La prueba del objetivo barajado; es de la fase 2 porque necesita un modelo contra el que barajar | fase 2 |
+| `run_interpretability.py` | — | fase 3 |
+| `run_monitoring.py` | Genera el reporte HTML | fase 4 |
+
+`run_prediction.py` salió del plan: el monitoreo calcula sus propias predicciones sobre producción y la app del Reto 2 predice de forma interactiva cargando el artefacto, así que un script de predicción por lotes no tiene usuario; si la fase 4 lo necesita, se agrega entonces.
 
 ---
 
