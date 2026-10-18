@@ -237,6 +237,12 @@ correlativo.
   fase. `loader.read_raw_csv` levanta `ValueError` ante una lista vacía, con test en
   `tests/test_loader.py`. Una lista vacía que significa "todas" reabría ERR-005 por el
   costado: columnas no declaradas con tipos inferidos.
+- **Nota de estado (2026-10-18), segunda instancia:** `pre-commit run --files` con una lista
+  vacía cae a su modo por defecto: guarda los cambios no preparados en un stash y los
+  restaura. Ocurrió al pasarle `$(git ls-files --others)` cuando todos los archivos ya
+  estaban preparados. Es el mismo mecanismo que `include_columns=[]`: una colección vacía
+  significa "nada" para quien llama y "todo", o "el default", para la herramienta. La
+  defensa es pasar la lista explícita y verificar que no esté vacía antes de invocar.
 
 ### ERR-009 · Un arnés de mutación leyó "no corrió ningún test" como "el mutante sobrevivió" · 2026-10-18
 

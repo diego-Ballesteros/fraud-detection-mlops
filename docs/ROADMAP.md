@@ -261,13 +261,7 @@ fraud-detection-mlops/
 │
 ├── src/fraud_detection/           ← sus módulos y su estado: tabla de abajo
 │
-├── scripts/
-│   ├── prepare_data.py            ← CSV → dos parquet, validación y mediciones
-│   ├── run_training.py            ← el AutoML
-│   ├── run_prediction.py
-│   ├── run_leakage_check.py
-│   ├── run_interpretability.py
-│   └── run_monitoring.py          ← genera el reporte HTML
+├── scripts/                       ← sus scripts y su estado: tabla de abajo
 │
 ├── app/                           ← requisito explícito (Reto 2)
 │   └── monitoring_app.py
@@ -305,6 +299,23 @@ archivo ya existe hacen fallar el test.
 | monitoring | drift | fase 4 |
 | monitoring | performance | fase 4 |
 | monitoring | report | fase 4 |
+
+### Scripts de `scripts/`
+
+Mismo vocabulario que la tabla de módulos: `existe` quiere decir que el archivo está en el
+repositorio; `fase N`, que está planificado para esa fase y todavía no existe.
+`tests/test_docs_consistency.py` verifica esta tabla contra la carpeta en las dos
+direcciones, con las mismas reglas.
+
+| Script | Qué hace | Estado |
+|---|---|---|
+| `prepare_data.py` | CSV → dos parquet, validación y mediciones | existe |
+| `run_training.py` | El AutoML | fase 2 |
+| `run_leakage_check.py` | La prueba del objetivo barajado; es de la fase 2 porque necesita un modelo contra el que barajar | fase 2 |
+| `run_interpretability.py` | — | fase 3 |
+| `run_monitoring.py` | Genera el reporte HTML | fase 4 |
+
+`run_prediction.py` salió del plan: el monitoreo calcula sus propias predicciones sobre producción y la app del Reto 2 predice de forma interactiva cargando el artefacto, así que un script de predicción por lotes no tiene usuario; si la fase 4 lo necesita, se agrega entonces.
 
 ---
 

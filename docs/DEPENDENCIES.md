@@ -9,6 +9,15 @@
 > - **Todo `uv add` actualiza este documento en el mismo turno**, con la cota revisada, no la
 >   que escribe la herramienta.
 > - Las versiones exactas viven en `uv.lock`; aquí solo van las cotas declaradas.
+>
+> **Aclaración de alcance de la política del ADR 0003.** El piso cubre el comportamiento de
+> la librería, no el de una combinación de frontend de notebook. `import matplotlib.pyplot`
+> fallando en 3.6.0 es la librería rota, y por eso el piso subió a 3.7. Que el backend inline
+> no registre el formateador PNG en la primera figura de la sesión es una interacción entre
+> matplotlib y los hooks de display de IPython: la librería funciona y los tests pasan en el
+> piso. Garantizar el renderizado exigiría acotar matplotlib-inline, ipykernel e IPython,
+> congelando la pila entera para proteger una configuración que nadie corre. Lo reproducible
+> es `uv sync --locked`, y en el lock la figura sale.
 
 ---
 
@@ -24,7 +33,7 @@
 
 | Dependencia | Cota declarada | Procedencia | Justificación |
 |---|---|---|---|
-| `matplotlib` | `>=3.7` | medido | El piso 3.6 admitía una configuración que falla: en la máquina de desarrollo, sin el VC++ Redistributable (ADR 0003), `matplotlib.pyplot` 3.6.0 importado solo da `DLL load failed while importing _path`. Desde 3.7.0 importa solo (medido en 3.7.0, 3.8.0, 3.9.0 y 3.10.0). En el piso, 3.7.0, el notebook 01 corre sin errores, pero con matplotlib-inline 0.2.2 la primera figura de cada sesión de kernel sale como texto `<Figure ...>`, sin imagen; con la versión del lock salen todas |
+| `matplotlib` | `>=3.7` | medido | El piso 3.6 admitía una configuración que falla: en la máquina de desarrollo, sin el VC++ Redistributable (ADR 0003), `matplotlib.pyplot` 3.6.0 importado solo da `DLL load failed while importing _path`. Desde 3.7.0 importa solo (medido en 3.7.0, 3.8.0, 3.9.0 y 3.10.0). En el piso, 3.7.0, el notebook 01 corre sin errores, pero con matplotlib-inline 0.2.2 la primera figura de cada sesión de kernel sale como texto `<Figure ...>`, sin imagen; con la versión del lock salen todas. Por qué eso no sube el piso: la aclaración de alcance del encabezado |
 | `pandas` | `>=2.2,<3` | política | Decisión del ADR 0002, con su costo medido en el ADR 0005; el piso 2.2.0 importa (ADR 0003) |
 | `pyarrow` | `>=16` | medido | El piso 14 resuelve con numpy 2 y falla al importar; 16 importa (ADR 0003) |
 | `pydantic` | `>=2.3` | derivado | Es el requisito que declara `pydantic-settings` 2.2.0 (ADR 0003) |
