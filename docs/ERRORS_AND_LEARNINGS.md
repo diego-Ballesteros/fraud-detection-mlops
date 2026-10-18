@@ -92,6 +92,10 @@ correlativo.
   medición al citarla.
 - **Referencias:** ERR-001, por la medición de tamaños del CSV que originó la inferencia
   de la instancia 2.
+- **Nota de estado (2026-10-18):** la instancia 2 quedó medida en la fase 1 con
+  `scripts/prepare_data.py`. El CSV en disco tiene 6.362.621 bytes `\n`, los 6.362.621
+  precedidos por `\r`, y ningún `\r` suelto. La inferencia era correcta, y sigue siendo
+  cierto que no estaba medida cuando se citó.
 
 ### ERR-003 · La resolución elige en silencio un paquete sin rueda para nuestra plataforma · 2026-10-18
 
@@ -129,3 +133,70 @@ correlativo.
   a la instrucción misma.
 - **Corrección:** el Arquitecto envió la continuación, con el texto exacto de la frase.
 - **Referencias:** ADR 0003, por la frase que llegó cortada.
+
+### ERR-005 · pandas tipa en silencio: enteros que desbordan y categorías que se vuelven nulos · 2026-10-18
+
+- **Síntoma:** ninguno visible, y por eso cuenta. Medido con pandas 2.3.3 antes de escribir
+  el loader: `pd.read_csv(..., dtype={"a": "int8"})` leyó `300` como `44`, y
+  `dtype={"c": "int16"}` leyó `40000` como `-25536`, sin error ni advertencia, con el motor
+  C y con el motor pyarrow. Con `dtype=CategoricalDtype(categories=[...])`, un valor fuera
+  de las categorías quedó como `NaN`, también sin aviso.
+- **Mecanismo:** el valor resultante es el original módulo 2^n (300 − 256 = 44;
+  40000 − 65536 = −25536): una truncación en complemento a dos, sin verificación de rango.
+  En qué punto de pandas ocurre no quedó determinado. En la categórica, todo valor ajeno a
+  las categorías fijadas se convierte en nulo: es una imputación silenciosa
+  (`docs/METHODOLOGY.md`, sección 7.1).
+- **Cómo se detectó:** un sondeo previo al código, que buscaba específicamente las
+  conversiones capaces de corromper un dato sin fallar.
+- **Corrección:** el CSV se parsea con `pyarrow.csv` y un tipo explícito por columna, que
+  rechaza `300` en `int8` con un `ArrowInvalid` que nombra la columna. `type` se lee con
+  categorías abiertas, y las declaradas se aplican después de validar el dominio, con una
+  guarda que se niega a crear nulos.
+- **Defensa:** nivel 2 de `docs/METHODOLOGY.md`, sección 6.5: dos tests de
+  `tests/test_loader.py`, uno para el entero fuera de rango y otro para el tipo fuera de
+  dominio.
+- **Aprendizaje:** un dtype explícito no es un dtype verificado. Un entero angosto afirma un
+  rango, y alguien tiene que comprobarlo.
+- **Referencias:** `src/fraud_detection/data/loader.py`, en el docstring del módulo.
+
+### ERR-006 · `astype` a una categórica no ordenada no reordena, y el síntoma se atribuyó al parquet · 2026-10-18
+
+- **Síntoma:** el test de dtypes del parquet falló: las categorías de `type` volvían en
+  orden de aparición (`PAYMENT`, `TRANSFER`, …) y no en el declarado (`CASH_IN`,
+  `CASH_OUT`, …). La comparación de dtypes con `==` había pasado.
+- **Mecanismo:** para pandas, dos categóricas no ordenadas con las mismas categorías son
+  iguales aunque el orden difiera, y `Series.astype(dtype)` no hace nada cuando el dtype
+  destino es igual al actual. Medido con pandas 2.3.3: `astype` deja
+  `['TRANSFER', 'PAYMENT', 'CASH_IN']` intacto, y `cat.set_categories` lo lleva a
+  `['CASH_IN', 'PAYMENT', 'TRANSFER']` conservando los valores.
+- **Error de diagnóstico previo:** en el sondeo inicial, el mismo síntoma se atribuyó a la
+  ida y vuelta por parquet, y así se informó durante el turno. Era falso: el sondeo hacía
+  un `astype` antes de escribir, y ese `astype` nunca había reordenado. Un segundo sondeo,
+  que construía la categórica desde cero, mostró que el parquet sí conserva el orden; la
+  contradicción entre los dos no se investigó en el momento.
+- **Cómo se detectó:** el test, que compara el orden de las categorías por separado
+  precisamente porque `==` no lo compara.
+- **Corrección:** `apply_declared_dtypes` recodifica con `cat.set_categories`.
+- **Defensa:** nivel 2: la aserción de orden en el test de dtypes de `tests/test_loader.py`.
+- **Aprendizaje:** dos sondeos que se contradicen son un hallazgo, no ruido. Y la igualdad
+  de dos dtypes no prueba que sean el mismo dtype.
+- **Referencias:** ERR-005, por la guarda contra nulos que comparte la misma función.
+
+### ERR-007 · Una dependencia opcional de pandas falla solo al llamarse · 2026-10-18
+
+- **Síntoma:** `scripts/prepare_data.py` completó trece mediciones y falló en la catorce con
+  `ModuleNotFoundError: No module named 'scipy'`, desde
+  `DataFrame.corrwith(..., method="spearman")`.
+- **Mecanismo:** pandas importa scipy dentro del método, en el momento de la llamada, no al
+  importar pandas. scipy no es dependencia del proyecto. ruff y mypy no pueden verlo, y
+  ningún test ejecuta las funciones de medición.
+- **Cómo se detectó:** la corrida completa del script.
+- **Corrección:** Spearman se calcula por su definición, como Pearson sobre rangos
+  promedio, sin scipy. Se verificó contra un caso con empates calculado a mano (3/√18).
+- **Defensa:** ninguna automática: nivel 3. Las funciones de medición no tienen tests en
+  esta fase, y es la defensa que falta (`docs/METHODOLOGY.md`, sección 7.6). Además, cuando
+  entre scikit-learn en la fase 2, scipy llegará como dependencia transitiva y el síntoma
+  desaparecerá sin que nadie lo haya decidido.
+- **Aprendizaje:** que pandas importe no garantiza que todos sus métodos corran.
+- **Referencias:** `src/fraud_detection/data/profiling.py`, en el docstring de la función
+  de correlación.
