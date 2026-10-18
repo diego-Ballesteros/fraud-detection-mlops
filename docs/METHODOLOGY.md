@@ -161,7 +161,7 @@ Criterio: **no es la dificultad, es el costo del error.**
 | `docs/analysis/` | Mediciones de registro, cada una **reproducible por un script del repositorio**. Sus cifras se citan desde los ADR. No se reescriben hacia atrás: se les agrega una nota de estado fechada |
 | `docs/ERRORS_AND_LEARNINGS.md` | Una entrada por error real, con **el mecanismo** — no solo el síntoma |
 | `docs/EVALUATION.md` | Qué se midió, cómo, con qué baseline al lado, y con qué resultado |
-| `docs/GIT_STRATEGY.md` | Ramas, commits, pull requests, releases y convención de idioma |
+| `docs/GIT_STRATEGY.md` | Ramas, commits, pull requests y releases |
 | `docs/METHODOLOGY.md` | Este documento. Dueño de la metodología de trabajo |
 | `CLAUDE.md` | Puntero corto a este documento. **Corto**, o deja de leerse |
 
@@ -196,6 +196,7 @@ puede citar ni discutir.
 | Docstrings y comentarios en código | Inglés |
 | Nombres de archivos, carpetas, ramas, commits | Inglés |
 | Todos los documentos markdown y los notebooks | Español |
+| Descripciones de pull requests y notas de release | Español. Los commits y los nombres de rama siguen en inglés |
 
 Los nombres de columnas del dataset se conservan como los entrega la fuente; lo que va en
 español es su descripción.

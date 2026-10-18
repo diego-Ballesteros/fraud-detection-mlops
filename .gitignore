@@ -38,6 +38,8 @@ mlflow.db
 /reports/**
 !/reports/**/
 !/reports/**/.gitkeep
+# Except deliverables: the phase 4 HTML report is graded and must be versioned.
+!/reports/deliverables/**
 
 # --- Jupyter -----------------------------------------------------------------
 .ipynb_checkpoints/

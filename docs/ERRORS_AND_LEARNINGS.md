@@ -1,7 +1,8 @@
 # Errores y aprendizajes
 
-> Contrato: una entrada por error real, que documenta el **mecanismo** —por qué ocurrió—
-> y no solo el síntoma.
+> Contrato: el registro guarda mecanismos que habrían costado un turno, hayan fallado o no,
+> y documenta el **mecanismo** —por qué ocurrió— y no solo el síntoma. Un registro que solo
+> admite errores que alcanzaron a fallar selecciona contra las buenas atrapadas.
 
 ---
 
@@ -27,3 +28,104 @@ correlativo.
 ---
 
 ## Entradas
+
+### ERR-001 · El CSV del dataset quedó commiteado · 2026-10-18
+
+- **Síntoma:** la verificación de que git no ve el archivo de datos salió en rojo.
+  `git check-ignore -v data/raw/PS_20174392719_1491204439457_log.csv` terminó con código 1
+  sin imprimir nada, y `git ls-files data/` listó el CSV.
+- **Mecanismo:** las reglas de `.gitignore` no se aplican a archivos que git ya rastrea, y
+  `git check-ignore` no informa sobre ellos aunque una regla coincida. El CSV entró en el
+  commit local `366df40` cuando el repositorio todavía no tenía `.gitignore`; escribir la
+  regla después no lo saca del índice. Por eso una regla correcta y un archivo rastreado
+  producen la misma salida roja que una regla mal escrita.
+- **Evidencia medida:**
+  - `366df40` agregó el CSV como 6.362.621 líneas; en ese commit no existía `.gitignore`.
+  - `main` y `develop` locales estaban un commit por delante de `origin`, que seguía en el
+    commit inicial: ninguna rama remota contenía el CSV.
+  - El blob en el commit pesaba 493.534.783 bytes.
+- **Cómo se detectó:** `git ls-files` al inicio del turno de andamiaje, antes de escribir
+  ningún archivo.
+- **Cómo se separaron las dos causas posibles:** `git check-ignore -v --no-index` evalúa
+  las reglas sin mirar el índice. Con controles positivos y negativos, el CSV coincidió
+  con `/data/**`, los `.gitkeep` y `.env.example` aparecieron re-incluidos por sus reglas
+  de negación, y `config.py` y `uv.lock` no coincidieron con ninguna. La regla era
+  correcta; la causa era el rastreo.
+- **Corrección:** `366df40` fue reemplazado por `0387288`, que no contiene el CSV. Estado
+  medido después: ninguna ref alcanza el blob (`git rev-list --all --objects` no lo
+  lista) y `main` coincide con `origin/main`.
+- **Defensa:** `.gitignore` excluye todo `data/` salvo los `.gitkeep`, y git no agrega
+  archivos ignorados (nivel 1: la herramienta lo impide). El hook `check-added-large-files`
+  detiene un archivo de más de 1024 KB añadido fuera de `data/` (nivel 1, mientras los
+  hooks estén instalados).
+- **Aprendizaje:** el `.gitignore` se escribe antes de que cualquier dato entre al árbol
+  de trabajo. Una salida roja de `check-ignore` necesita su control con `--no-index` antes
+  de tocar la regla: sin él, "regla mal escrita" y "archivo ya rastreado" se leen igual.
+- **Referencias:** `366df40` (ya no alcanzable desde ninguna rama), `0387288`.
+
+### ERR-002 · Un dato derivado presentado como medido sostuvo un requisito · 2026-10-18
+
+- **Síntoma:** dos afirmaciones sobre el estado del repositorio se reportaron como hechos
+  medidos sin serlo, y una de ellas llegó a un prompt como criterio de aceptación.
+  - **Instancia 1, del Ejecutor:** el reporte afirmó que `ruff format` revisaba "4 `.py` +
+    `pyproject.toml` + 6 `.md`". En realidad eran 4 `.py` y 7 `.md`; `ruff format` nunca
+    revisa `pyproject.toml`. El dato equivocado entró en el prompt siguiente como criterio
+    de aceptación: "debe reportar solo archivos Python y pyproject.toml".
+  - **Instancia 2, del Arquitecto:** el prompt siguiente dijo que la medición del Ejecutor
+    "confirmó" que la copia en disco del CSV tiene finales CRLF. No lo confirmó: la
+    diferencia de exactamente un byte por línea entre la copia en disco y el blob es
+    evidencia fuerte pero indirecta, y el archivo nunca se abrió.
+- **Mecanismo:** un dato derivado se presentó como medido y después sostuvo un requisito.
+  En la instancia 1, la lista de archivos de `ruff format` se dedujo de
+  `ruff check --show-files`, que incluye `pyproject.toml` por las reglas RUF, en vez de
+  contar la salida del propio `format`. En la instancia 2, una inferencia que el reporte
+  marcaba como tal se citó como medición.
+- **Cómo se detectó:** la instancia 1, al contar las líneas `format_path` de
+  `ruff format --check --verbose`. La instancia 2, al contrastar el prompt con el reporte
+  original, que decía "inferencia, no medido".
+- **Corrección:** las dos se corrigieron como premisas en el turno siguiente, y el
+  Arquitecto las aceptó.
+- **Defensa:** nivel 3 de la jerarquía de `docs/METHODOLOGY.md`, sección 6.5: está escrito
+  en este registro. Ninguna herramienta ni test lo detecta.
+- **Aprendizaje:** un dato que se derivó de otra salida se reporta como derivado,
+  nombrando de dónde salió. Y el Arquitecto no asciende una inferencia del Ejecutor a
+  medición al citarla.
+- **Referencias:** ERR-001, por la medición de tamaños del CSV que originó la inferencia
+  de la instancia 2.
+
+### ERR-003 · La resolución elige en silencio un paquete sin rueda para nuestra plataforma · 2026-10-18
+
+- **Síntoma:** ninguno visible, y eso es lo que importa. La resolución universal de la pila
+  completa salió en verde y eligió numba 0.53.1 y llvmlite 0.36.0 para todo Python <3.12.
+  Ninguna de las dos tiene rueda cp311-win_amd64.
+- **Mecanismo:** tres piezas, y ninguna avisa.
+  - uv ignora las cotas superiores de `requires_python` de las dependencias. Por eso numba
+    0.53.1, que declara `>=3.6,<3.10`, es elegible en 3.11.
+  - El pin `pandas<3` inclina la resolución universal hacia esa versión. El síntoma está
+    medido (V0 contra V1); el porqué no.
+  - Todo sale en verde: ninguna herramienta compara lo resuelto con las ruedas que existen
+    para la plataforma.
+- **Cómo se detectó:** **no falló**. La resolución en seco que cerraba otro hallazgo (las
+  cotas de pyarrow y mlflow) mostró líneas de numba distintas de las de la primera
+  resolución. El verificador de ruedas, que se había construido para medir el pin de Python,
+  confirmó que esas versiones no tienen rueda. Ninguna de las dos mediciones buscaba esto.
+- **Corrección:** `[tool.uv] constraint-dependencies = ["numba>=0.57"]`. Con la constraint,
+  la resolución elige numba 0.68.0 y llvmlite 0.50.0; sin ella (control), 0.53.1 y 0.36.0.
+- **Defensa:** para numba, nivel 1 de `docs/METHODOLOGY.md`, sección 6.5: la constraint lo
+  impide. Para la clase general, cualquier transitiva sin rueda, nivel 3: ningún test compara
+  el lock con las ruedas disponibles.
+- **Aprendizaje:** una resolución en verde no prueba que lo resuelto se pueda instalar en
+  nuestra plataforma. Eso se mide aparte.
+- **Referencias:** ADR 0003, ADR 0004, ADR 0005.
+
+### ERR-004 · Un prompt del Arquitecto llegó truncado a mitad de frase · 2026-10-18
+
+- **Síntoma:** el prompt terminaba en "…así que fijar el intérprete crea pisos", sin cerrar
+  la frase y sin las secciones que cierran un prompt.
+- **Mecanismo:** una instrucción incompleta se lee igual que una completa, salvo en el punto
+  exacto del corte.
+- **Defensa que funcionó:** no completar la frase e informar el corte antes de cualquier
+  otra cosa. Es la regla de autoría de los ADR (`docs/METHODOLOGY.md`, sección 3) aplicada
+  a la instrucción misma.
+- **Corrección:** el Arquitecto envió la continuación, con el texto exacto de la frase.
+- **Referencias:** ADR 0003, por la frase que llegó cortada.
