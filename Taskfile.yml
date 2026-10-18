@@ -1,0 +1,33 @@
+version: "3"
+
+# Each task wraps the same command you would type by hand; Task is optional.
+
+tasks:
+  setup:
+    desc: Install the environment from uv.lock and the git pre-commit hooks
+    cmds:
+      - uv sync
+      - uv run pre-commit install
+
+  lint:
+    desc: Lint with ruff and verify formatting without rewriting files
+    cmds:
+      - uv run ruff check .
+      - uv run ruff format --check .
+
+  typecheck:
+    desc: Type-check src/ with mypy
+    cmds:
+      - uv run mypy src/
+
+  test:
+    desc: Run the test suite with coverage over the package
+    cmds:
+      - uv run pytest -v
+
+  check:
+    desc: Run lint, typecheck and test in sequence (same steps as CI)
+    cmds:
+      - task: lint
+      - task: typecheck
+      - task: test
