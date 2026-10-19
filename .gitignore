@@ -28,6 +28,9 @@ mlruns/
 mlartifacts/
 mlflow.db
 
+# --- Optuna: the search study, resumable, never versioned ---------------------
+optuna.db
+
 # --- Data: nothing under data/ is versioned except the .gitkeep placeholders ---
 # Directories are re-included so git can descend into them and find the .gitkeep
 # files; every file inside stays ignored, including any new subfolder.

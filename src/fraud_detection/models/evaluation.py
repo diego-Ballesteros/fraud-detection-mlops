@@ -696,6 +696,22 @@ def _warning_text(caught: list[warnings.WarningMessage]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(texts))
 
 
+def compose(preprocessor: EstimatorFactory, model: EstimatorFactory) -> Pipeline:
+    """Build the one Pipeline shape of the project: a fresh preprocessor, then a fresh model.
+
+    The harness fits every fold with it and ``models.registry`` builds the artifact with it,
+    so the evaluated object and the served object have the same structure by construction.
+
+    Args:
+        preprocessor: Factory of the preprocessing step.
+        model: Factory of the classifier.
+
+    Returns:
+        ``Pipeline([("preprocess", ...), ("model", ...)])``, unfitted.
+    """
+    return Pipeline([("preprocess", preprocessor()), ("model", model())])
+
+
 @dataclass(frozen=True)
 class _FittedFold:
     """A fold after fitting and scoring: what both evaluate_fold and score_one_fold need."""
@@ -734,7 +750,7 @@ def _fit_and_score(
     if set(np.unique(train_labels).tolist()) != {0, 1}:
         raise ValueError(f"Fold {fold}: the training labels must hold both classes")
 
-    estimator = Pipeline([("preprocess", preprocessor()), ("model", model())])
+    estimator = compose(preprocessor, model)
     notify(FoldEvent(FIT_STARTED, fold))
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")

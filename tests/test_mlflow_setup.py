@@ -121,7 +121,12 @@ def test_the_import_probe_sees_every_violation(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    "module", ["fraud_detection.tracking.mlflow_setup", "fraud_detection.models.tracking"]
+    "module",
+    [
+        "fraud_detection.tracking.mlflow_setup",
+        "fraud_detection.models.tracking",
+        "fraud_detection.models.registry",
+    ],
 )
 def test_importing_builds_no_client_and_touches_nothing(module: str, tmp_path: Path) -> None:
     assert probe_import(module, tmp_path) == {

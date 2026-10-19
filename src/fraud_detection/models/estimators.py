@@ -81,8 +81,11 @@ def random_forest() -> RandomForestClassifier:
     return RandomForestClassifier(n_jobs=ALL_CORES, random_state=settings.RANDOM_STATE)
 
 
-def lightgbm_classifier() -> Any:
-    """LightGBM with its defaults; ``verbose=-1`` only silences its log.
+def lightgbm_classifier(**params: Any) -> Any:
+    """LightGBM with its defaults or the given hyperparameters; ``verbose=-1`` silences its log.
+
+    Args:
+        **params: Hyperparameters to set; none gives LightGBM's defaults.
 
     Returns:
         A new ``lightgbm.LGBMClassifier``.
@@ -90,7 +93,9 @@ def lightgbm_classifier() -> Any:
     # Deferred on purpose: see the module docstring.
     from lightgbm import LGBMClassifier
 
-    return LGBMClassifier(n_jobs=ALL_CORES, random_state=settings.RANDOM_STATE, verbose=-1)
+    # The project's seed and every core unless the caller overrides them.
+    settings_first = {"n_jobs": ALL_CORES, "random_state": settings.RANDOM_STATE, "verbose": -1}
+    return LGBMClassifier(**{**settings_first, **params})
 
 
 @dataclass(frozen=True)

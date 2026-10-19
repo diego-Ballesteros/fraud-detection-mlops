@@ -473,3 +473,68 @@ correlativo.
 - **Referencias:** EVAL-004, EVAL-008, ERR-013.
 - **Pendiente:** versionar la medición por iteración. Hasta entonces, sus cifras son de este
   cuaderno de laboratorio y no sostienen ningún documento entregable.
+
+### ERR-015 · Un ensayo encolado no es un ensayo hecho · 2026-10-19
+
+- **Síntoma:** el ensayo corto de `scripts/run_training.py` imprimió `trials so far 3; this run
+  may add 0`, no corrió nada y rotuló como `pruned` los tres puntos de partida.
+- **Mecanismo:** `study.enqueue_trial` crea el ensayo en el almacenamiento en estado WAITING.
+  El script restaba `len(study.trials)` al tope de ensayos, y por eso contaba los encolados
+  como gastados. El resumen leía "sin valor" como "podado". En la búsqueda real, con tope 150,
+  habría corrido 147 ensayos y el error habría pasado inadvertido.
+- **Cómo se detectó:** el ensayo corto contra almacenamientos descartables, que el Arquitecto
+  dejó como requisito antes de la búsqueda, con el tope igual a 3: ahí el error se ve entero.
+- **Corrección:** el presupuesto cuenta solo los ensayos terminados (`state.is_finished()`), y
+  el resumen informa el estado de cada ensayo, no la ausencia de valor. Control: un ensayo
+  recién encolado da `WAITING` y `is_finished() == False`.
+- **Defensa:** nivel 3 de `docs/METHODOLOGY.md`, sección 6.5: el ensayo corto es un
+  procedimiento y el script no tiene tests.
+- **Aprendizaje:** un ensayo corto con el tope igual al número de ensayos encolados no es un
+  trámite: es el caso en que un error de conteo se vuelve total y visible.
+- **Referencias:** `scripts/run_training.py`, EVAL-009.
+
+### ERR-016 · Dos instrumentos que respondían bien sin medir nada · 2026-10-19
+
+- **Síntoma:** dos verificaciones ad hoc dieron respuestas plausibles y falsas.
+  - Un muestreador de memoria con `Get-Counter '\Memory\Available MBytes'` no habría escrito
+    ninguna muestra, y un archivo vacío se lee igual que "no hubo swap".
+  - Una consulta de procesos que buscaba `*sample_memory.ps1*` contó un proceso vivo cuando ya
+    no quedaba ninguno.
+- **Mecanismo:**
+  - Los nombres de los contadores de rendimiento de Windows están traducidos al idioma del
+    sistema, y este Windows está en español. Con `-ErrorAction SilentlyContinue`, el nombre
+    en inglés devuelve nada, sin error. Las clases CIM (`Win32_PerfFormattedData_PerfOS_Memory`)
+    no dependen del idioma.
+  - La línea de comando de la propia consulta contiene el texto que busca, así que la consulta
+    se encuentra a sí misma.
+- **Cómo se detectó:** el primero, con un control previo (consultar el contador una vez y
+  mirar la respuesta) antes de confiar en él. El segundo, mirando qué proceso era: la consulta
+  misma.
+- **Corrección:** el muestreador usa CIM, y la consulta excluye su propio PID.
+- **Defensa:** nivel 3: son instrumentos ad hoc, no versionados.
+- **Aprendizaje:** es `docs/METHODOLOGY.md`, sección 7.6, otra vez. Un instrumento se prueba
+  primero contra un caso donde la respuesta se conoce, y un detector que busca un texto tiene
+  que excluirse a sí mismo de la búsqueda.
+- **Referencias:** ERR-009, ERR-010.
+
+### ERR-017 · El entorno mata los procesos largos en segundo plano cuando falta memoria · 2026-10-19
+
+- **Síntoma:** dos procesos en segundo plano murieron sin fallar: una espera del `.env` y la
+  búsqueda de hiperparámetros, que se cortó con 8 ensayos terminados, uno a medio ajustar y la
+  corrida padre de MLflow en RUNNING.
+- **Mecanismo:** Claude Code detiene las shells en segundo plano cuando la memoria del sistema
+  está críticamente baja y la sesión está inactiva. No es un fallo del proceso detenido, y el
+  aviso lo dice así. En esta máquina la memoria disponible bajó hasta 231 MB durante la
+  búsqueda, con otras aplicaciones abiertas.
+- **Cómo se detectó:** por el aviso del entorno, y después leyendo el estudio, el log y MLflow
+  para saber hasta dónde había llegado.
+- **Corrección:** el ensayo cortado se marcó FAIL en el estudio con su motivo, y la corrida
+  padre se cerró como KILLED con la etiqueta `cut_reason`. El estudio quedó reanudable, y no se
+  reanudó: con 8 ensayos el resultado estaba cerrado (ADR 0010). El trabajo siguiente se corrió
+  en primer plano.
+- **Defensa:** nivel 3. Un trabajo largo se lanza desde una terminal propia, o con Claude Code
+  iniciado con `CLAUDE_CODE_DISABLE_BG_SHELL_PRESSURE_REAP=1`, y con un almacenamiento que
+  sobreviva al corte, como el de la búsqueda.
+- **Aprendizaje:** que un trabajo largo sea reanudable no es un lujo: es lo que convirtió un
+  corte en un resultado parcial en vez de en una pérdida.
+- **Referencias:** EVAL-009, ADR 0010.
