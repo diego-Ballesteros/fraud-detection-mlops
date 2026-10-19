@@ -148,3 +148,14 @@ Por eso numba, igual que lightgbm, **falla si se importa solo** e importa si ant
 scikit-learn, que trae y precarga una `msvcp140.dll` con ese nombre exacto. Pasa lo mismo en
 el piso (0.57.0) y en el techo (0.68.0), así que no cambia el veredicto del piso. **Está
 pendiente de decisión y no se corrigió.**
+
+---
+
+**Nota de estado (2026-10-18, fase 2):** para lightgbm, la condición quedó decidida. El
+Verificador eligió importar lightgbm dentro de su fábrica, en
+`src/fraud_detection/models/estimators.py`, en vez de instalar el VC++ Redistributable en la
+máquina, y un test construye el modelo en un intérprete limpio. Medido al decidirlo: el
+`lib_lightgbm.dll` de lightgbm 4.7.0 declara `MSVCP140.dll` y `VCOMP140.DLL` en su tabla de
+importaciones, scikit-learn trae las dos con esos nombres exactos, y lightgbm 4.0.0, el piso,
+importa solo. Para numba sigue pendiente: todavía no está en el grafo. Los pisos de mlflow y
+de scikit-learn cambiaron en la misma fase; la tabla viva es `docs/DEPENDENCIES.md`.

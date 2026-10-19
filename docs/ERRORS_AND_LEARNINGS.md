@@ -294,3 +294,37 @@ correlativo.
   del verde en falso de `docs/METHODOLOGY.md`, sección 7.6.
 - **Referencias:** `Taskfile.yml`, tarea `notebooks`; `docs/DEPENDENCIES.md`, fila de
   `nbclient`; ERR-009.
+
+### ERR-011 · Una dependencia nueva invalidó el piso de otra sin tocar su declaración · 2026-10-18
+
+- **Síntoma:** ninguno en el lock, que resolvió en verde (scikit-learn 1.9.1, mlflow
+  3.17.1). Solo la verificación en los pisos lo mostró: con mlflow y lightgbm agregados,
+  scikit-learn 1.2.0, su piso de entonces, falló al importar
+  (`ValueError: numpy.dtype size changed, may indicate binary incompatibility`). Al subir ese
+  piso apareció un segundo caso: mlflow 3.0.0, su piso de entonces, falló al abrir el store
+  sqlite (`ImportError: cannot import name 'FallbackAsyncAdaptedQueuePool' from
+  'sqlalchemy.pool'`). `DEPENDENCIES.md` seguía afirmando que la suite pasaba en los pisos.
+- **Mecanismo:** dos piezas, y ninguna avisa.
+  - `--resolution lowest-direct` baja solo las dependencias directas; las transitivas, como
+    numpy y SQLAlchemy, toman la versión más alta compatible. Agregar mlflow o lightgbm,
+    cualquiera de las dos sola, llevó numpy de 1.26.4 a 2.4.6 en la resolución en los pisos,
+    aunque ninguna declara `numpy>=2` (mlflow 3.0.0 declara `numpy<3`; lightgbm 4.0.0,
+    `numpy` sin cota). El resolvedor sube pandas de 2.2.0 a 2.2.2 en vez de bajar numpy; por
+    qué elige ese camino no está determinado.
+  - Las dos versiones afectadas declaran una compatibilidad que no tienen: scikit-learn 1.2.0
+    y 1.3.0 piden `numpy>=1.17.3` sin techo y no son binariamente compatibles con numpy 2, y
+    mlflow 3.0.0 a 3.8.1 piden `sqlalchemy<3` e importan un símbolo que SQLAlchemy 2.1 ya no
+    tiene. Es el mismo hecho que registra el ADR 0005: compatibilidad declarada no es
+    compatibilidad en ejecución.
+- **Cómo se detectó:** el procedimiento de `docs/DEPENDENCIES.md` para verificar un piso,
+  corrido porque ese documento se actualiza en el mismo turno que el `uv add`, y corrido con
+  la suite completa y no solo con los imports de las dependencias nuevas.
+- **Corrección:** por la política del ADR 0003, los pisos subieron a lo medido:
+  `scikit-learn>=1.4.2` (1.4.2 es la primera que importa en esa resolución) y
+  `mlflow>=3.9,<4` (3.8.1 falla, 3.9.0 pasa). Las dos subidas las decidió el Verificador en
+  el turno. El lock no se movió. En los pisos nuevos, la suite completa pasa (142 tests).
+- **Defensa:** nivel 3 de `docs/METHODOLOGY.md`, sección 6.5: está escrita en el
+  procedimiento de `docs/DEPENDENCIES.md`. Ningún job de CI corre la suite en los pisos.
+- **Aprendizaje:** un `uv add` verifica los pisos de todas las dependencias, no solo los de
+  las que entran. El piso de scikit-learn se rompió sin que nadie tocara su línea.
+- **Referencias:** ADR 0003, ADR 0005, `docs/DEPENDENCIES.md`.

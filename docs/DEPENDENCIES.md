@@ -33,12 +33,14 @@
 
 | Dependencia | Cota declarada | Procedencia | Justificación |
 |---|---|---|---|
+| `lightgbm` | `>=4.0` | medido | Inicio de la serie mayor en uso (ADR 0003). En el piso, 4.0.0, la suite pasa (sección de abajo). En la máquina de desarrollo, sin el VC++ Redistributable, `import lightgbm` solo, sin scikit-learn importado antes, falla con la versión del lock (`lib_lightgbm.dll (or one of its dependencies)`) y no con la del piso, 4.0.0, que importa sola (medido en las dos). Por eso `models/estimators.py` lo importa dentro de su fábrica, y un test construye el modelo en un intérprete limpio |
 | `matplotlib` | `>=3.7` | medido | El piso 3.6 admitía una configuración que falla: en la máquina de desarrollo, sin el VC++ Redistributable (ADR 0003), `matplotlib.pyplot` 3.6.0 importado solo da `DLL load failed while importing _path`. Desde 3.7.0 importa solo (medido en 3.7.0, 3.8.0, 3.9.0 y 3.10.0). En el piso, 3.7.0, el notebook 01 corre sin errores, pero con matplotlib-inline 0.2.2 la primera figura de cada sesión de kernel sale como texto `<Figure ...>`, sin imagen; con la versión del lock salen todas. Por qué eso no sube el piso: la aclaración de alcance del encabezado |
-| `pandas` | `>=2.2,<3` | política | Decisión del ADR 0002, con su costo medido en el ADR 0005; el piso 2.2.0 importa (ADR 0003) |
+| `mlflow` | `>=3.9,<4` | medido | La cota de mayor es la del ADR 0003: sin ella el resolvedor retrocede en silencio a mlflow 1.27.0. El piso subió de 3.0 a 3.9 por medición: con SQLAlchemy 2.1.5, la transitiva que se resuelve, mlflow 3.0.0 a 3.8.1 fallan al abrir el store sqlite (`cannot import name 'FallbackAsyncAdaptedQueuePool' from 'sqlalchemy.pool'`), y 3.9.0 pasa la suite. mlflow declara `pyarrow<26` |
+| `pandas` | `>=2.2,<3` | política | Decisión del ADR 0002, con su costo medido en el ADR 0005; el piso 2.2.0 importa (ADR 0003). Con mlflow y lightgbm en el grafo, la resolución en los pisos elige 2.2.2: el conjunto resuelve numpy 2.4.6, y pandas 2.2.0 declara `numpy<2` |
 | `pyarrow` | `>=16` | medido | El piso 14 resuelve con numpy 2 y falla al importar; 16 importa (ADR 0003) |
 | `pydantic` | `>=2.3` | derivado | Es el requisito que declara `pydantic-settings` 2.2.0 (ADR 0003) |
 | `pydantic-settings` | `>=2.2` | medido | Primera versión cuyo código tiene `env_ignore_empty`, que usa `config.py` (ADR 0003) |
-| `scikit-learn` | `>=1.2` | medido | `Pipeline.set_output` y `OneHotEncoder(sparse_output=...)`, que usa el Pipeline, aparecen en 1.2: en 1.1.3 faltan las dos. En los pisos de todas las dependencias (scikit-learn 1.2.0, pandas 2.2.0, numpy 1.26.4), la suite completa pasa (84 tests, 2026-10-18) |
+| `scikit-learn` | `>=1.4.2` | medido | El piso de la fase 1 era 1.2, por la API: `Pipeline.set_output` y `OneHotEncoder(sparse_output=...)` aparecen en 1.2. Subió a 1.4.2 en la fase 2: con mlflow o lightgbm en el grafo, cualquiera de las dos, la resolución en los pisos pasa de numpy 1.26.4 a numpy 2.4.6, y con numpy 2 la 1.2.0 falla al importar (`numpy.dtype size changed, may indicate binary incompatibility`) igual que la 1.3.0 (`cannot import name 'ComplexWarning'`). 1.4.2 importa. Ninguna de las dos dependencias declara `numpy>=2`; por qué la resolución se inclina hacia numpy 2 no está determinado (`docs/ERRORS_AND_LEARNINGS.md`, ERR-011) |
 
 ## Dependencias de desarrollo
 
@@ -60,6 +62,14 @@ No son dependencias directas: van en `[tool.uv] constraint-dependencies`.
 | Dependencia | Cota | Procedencia | Justificación |
 |---|---|---|---|
 | `numba` | `>=0.57` | medido | Sin ella, la resolución universal retrocede a numba 0.53.1, sin rueda cp311 para Windows; 0.57 es la primera con soporte de Python 3.11 (ADR 0003, ADR 0004) |
+
+## Última verificación en los pisos
+
+2026-10-18, al agregar mlflow y lightgbm. La resolución en los pisos fija 133 paquetes,
+entre ellos scikit-learn 1.4.2, mlflow 3.9.0, lightgbm 4.0.0, pandas 2.2.2, numpy 2.4.6,
+pyarrow 16.0.0, pydantic 2.9.0, pydantic-settings 2.2.0, matplotlib 3.7.0 y SQLAlchemy
+2.1.5. Instalado ese conjunto con el procedimiento de abajo, la suite completa pasa: 142
+tests.
 
 ## Cómo se verifica un piso
 

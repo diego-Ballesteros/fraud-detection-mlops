@@ -175,10 +175,14 @@ transformación.
 
 ### 5.1 Métricas del modelo
 
+La métrica de decisión, su secundaria y las de contexto se fijaron en la fase 2, antes de
+medir: ADR 0009, con el contrato en `docs/EVALUATION.md`. La tabla de abajo es el plan
+original; donde difiere, manda el ADR.
+
 | Métrica | Por qué |
 |---|---|
-| **PR-AUC** | Métrica principal. Con 0,1% de positivos, ROC-AUC es engañosamente optimista |
-| Recall a precisión fija | El negocio revisa una cola de capacidad limitada |
+| **PR-AUC** | Plan original: métrica principal. Con 0,1% de positivos, ROC-AUC es engañosamente optimista. Quedó como contexto: la firma la satura (ADR 0009) |
+| **Recall a precisión fija** | El negocio revisa una cola de capacidad limitada. Es la métrica de decisión, con precisión ≥ 0,99 (ADR 0009) |
 | Precision@k | "De las k transacciones que marqué, ¿cuántas eran fraude?" |
 | ROC-AUC | Comparabilidad con la literatura |
 | Matriz de confusión con costos | Traduce el modelo a pérdidas, no a porcentajes |
@@ -289,11 +293,13 @@ archivo ya existe hacen fallar el test.
 | features | builder | existe |
 | features | pipeline | existe |
 | models | baseline | existe |
-| models | estimators | fase 2 |
+| models | estimators | existe |
 | models | search_space | fase 2 |
-| models | evaluation | fase 2 |
-| models | tracking | fase 2 |
+| models | evaluation | existe |
+| models | fit_guard | existe |
+| models | tracking | existe |
 | models | registry | fase 2 |
+| tracking | mlflow_setup | existe |
 | explain | global_explain | fase 3 |
 | explain | local_explain | fase 3 |
 | monitoring | drift | fase 4 |
@@ -311,7 +317,8 @@ direcciones, con las mismas reglas.
 |---|---|---|
 | `prepare_data.py` | CSV → dos parquet, validación y mediciones | existe |
 | `run_training.py` | El AutoML | fase 2 |
-| `run_leakage_check.py` | La prueba del objetivo barajado; es de la fase 2 porque necesita un modelo contra el que barajar | fase 2 |
+| `run_default_models.py` | Los baselines y las tres familias con hiperparámetros por defecto, por los dos splitters | existe |
+| `run_leakage_check.py` | La prueba del objetivo barajado; es de la fase 2 porque necesita un modelo contra el que barajar | existe |
 | `run_interpretability.py` | — | fase 3 |
 | `run_monitoring.py` | Genera el reporte HTML | fase 4 |
 
