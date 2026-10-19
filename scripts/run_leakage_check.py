@@ -11,9 +11,11 @@ harness as every model:
    ``derived_seeds(PERMUTATIONS)``. Its PR-AUC distribution is what a ranking that knows
    nothing reaches on these labels, the upward bias of few positives included.
 2. **The permutation test:** the training labels of every fold permuted with each seed,
-   the validation labels intact, the full Pipeline fitted. LightGBM, the cheapest and most
-   sensitive detector, and logistic regression get 20 permutations; Random Forest gets 1. A
-   leak is a property of the pipeline and the fold structure, not of the model family.
+   the validation labels intact, the full Pipeline fitted. LightGBM and logistic regression
+   get 20 permutations; Random Forest gets 1. A leak is a property of the pipeline and the
+   fold structure, not of the model family. A detector only has power if the model learns
+   the real labels: with its default hyperparameters LightGBM does not (PR-AUC 0.034,
+   EVAL-008), so the evidence rests on logistic regression and Random Forest (EVAL-004).
 
 Seed 0 of ``derived_seeds`` is ``settings.RANDOM_STATE``, the single permutation of the
 first test, so draw 0 must reproduce it exactly.

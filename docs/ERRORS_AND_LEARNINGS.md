@@ -363,3 +363,103 @@ correlativo.
   UTF-8 al arrancar**, no que alguien lo recuerde cada vez. Hoy la cumplen los dos scripts de
   la fase 2. `scripts/prepare_data.py` todavía no: queda pendiente, igual que subir la regla
   al nivel 2 con un test que la verifique en cada script de `scripts/`.
+- **Nota de estado (2026-10-18), segunda:** `scripts/prepare_data.py` ya reconfigura stdout,
+  igual que los dos scripts de diagnóstico nuevos. Subir la regla al nivel 2 sigue pendiente.
+
+### ERR-013 · Un criterio a escala de la prevalencia y una permutación única dieron una alarma de fuga sin fuga · 2026-10-18
+
+- **Síntoma:** el test de objetivo barajado, con una sola permutación, marcó LightGBM en el
+  fold 2 con 14,83 veces la prevalencia, por encima del margen de 10, y quedó como bloqueante
+  (EVAL-002). En valor absoluto, el PR-AUC era 0,0112, contra los ~0,98 de la firma.
+- **Mecanismo:**
+  - Un criterio expresado como cociente contra una prevalencia de 7,6e-4 convierte ruido
+    indistinguible de cero en una alarma de 14,83×: en absoluto, 0,0112 contra los ~0,98 de
+    la firma. Una permutación única es una muestra de tamaño uno y no separa azar de fuga.
+  - El nulo tiene que ser el mismo modelo permutado: un ranking aleatorio sobre los mismos
+    folds llega a 1,50× como máximo en 100 sorteos, así que la escasez de positivos no
+    explica 14,8×.
+  - **Mecanismo medido, que contradice la hipótesis inicial del Arquitecto:** el AP no se
+    infla por precisión alta en la cabeza: el top 100 tiene **cero** positivos. Se infla por
+    saltos grandes de recall con precisión moderada. Tres bloques de puntaje idéntico (50, 20
+    y 7 filas), todas fraude y todas con firma, en los puestos ~1.400–1.550 y con precisión de
+    5–7%, aportan el 86,6% del AP; el bloque de 50 suma 11% de recall de golpe.
+  - **Por qué existen los bloques:** un modelo de árboles parte sobre la feature de la firma
+    incluso con etiquetas barajadas, porque el corte se elige por impureza sobre las etiquetas
+    de entrenamiento, y un grupo raro y perfectamente puro se ve localmente informativo por
+    azar. Puntaje idéntico es camino idéntico en todos los árboles. El valor de la hoja solo
+    necesitó quedar apenas encima de la tasa base de entrenamiento (0,001045 contra 0,00085)
+    para producir el salto. El bloque es puro fraude en validación por la relación real de la
+    firma, que el modelo **no** aprendió: solo agrupó por ella.
+  - **Lo que no se midió:** que el exceso de positivos barajados en filas de entrenamiento con
+    firma (4 observados contra 2,27 esperados) sea la causa de que esas hojas subieran.
+    Exigiría inspeccionar los árboles.
+  - **Consecuencia general:** el nulo de permutación de este dataset tiene una cola derecha
+    unas 10 veces más gorda que la de un ranking aleatorio, y la engorda la geometría de la
+    feature, no información de la etiqueta. El test sigue discriminando porque las etiquetas
+    reales dan ~0,98, dos órdenes por encima del peor caso del nulo.
+- **Cómo se detectó:** repitiendo el test con 20 permutaciones del mismo modelo y midiendo,
+  al lado, el clasificador aleatorio sobre los mismos folds (EVAL-003, EVAL-004). La
+  permutación que había fallado resultó ser el máximo de su distribución, reproducido al
+  dígito. La cabeza del ranking y la descomposición del AP por bloques las miden
+  `scripts/diagnose_head.py` y `scripts/diagnose_ap.py`.
+- **Corrección:** el criterio pasó a valor absoluto sobre la distribución de 20
+  permutaciones, con el ROC-AUC como segunda condición (ADR 0009, nota de estado). Con él, el
+  test pasa.
+- **Defensa:** test de permutación con N sorteos; criterio en valor absoluto; el ROC-AUC
+  como el discriminador que separa ruido de fuga —una fuga lo empuja hacia 1,0, el ruido lo
+  deja alrededor de 0,5 o por debajo—; y el clasificador aleatorio como control que descarta
+  la escasez. Nivel 2 de `docs/METHODOLOGY.md`, sección 6.5, cuando se corre
+  `scripts/run_leakage_check.py`, que sale con código 1 si el criterio falla. No corre en CI,
+  porque necesita los datos.
+- **Aprendizaje:** el nulo correcto de un test de objetivo barajado es una permutación del
+  mismo modelo, nunca una línea base aleatoria.
+- **Referencias:** ADR 0009 (nota de estado), EVAL-002, EVAL-003, EVAL-004.
+- **Nota del Ejecutor sobre las cifras (2026-10-18):**
+  - Que el modelo parte sobre la firma está medido: el LightGBM de esa permutación tiene 2
+    cortes sobre `amount_equals_origin_balance` en sus 100 árboles (`scripts/diagnose_ap.py`).
+  - 0,001045 es el puntaje del bloque, el que da el ensamble entero, no el valor de una sola
+    hoja.
+  - "Unas 10 veces más gorda" vale en el máximo: 0,0112 contra 0,00113, 9,9 veces; en el
+    percentil 95 son 4,2 veces (0,00345 contra 0,00083).
+  - "Dos órdenes por encima" son, medido, 0,98 / 0,0112 ≈ 87 veces.
+
+### ERR-014 · LightGBM con sus valores por defecto diverge, y un detector que no aprende no detecta · 2026-10-18
+
+- **Síntoma:** con etiquetas reales, LightGBM con sus hiperparámetros por defecto da recall 0 a
+  precisión ≥ 0,99 en los 10 folds, con PR-AUC de 0,034 ± 0,072 (temporal) y ROC-AUC de 0,47
+  (EVAL-008). Con los mismos folds, la regla da 0,979 y Random Forest, 0,998.
+- **Mecanismo:** el entrenamiento diverge. Lo que sigue es una **medición ad hoc, sin
+  versionar** (un solo ajuste sobre el fold 5 temporal, con etiquetas reales, evaluado
+  iteración por iteración):
+
+  | Iteración | 1 | 5 | 20 | 50 | 100 |
+  |---|---|---|---|---|---|
+  | PR-AUC de entrenamiento | 0,9956 | 0,9895 | 0,9668 | 0,4443 | 0,0008 |
+  | PR-AUC de validación | 0,9978 | 0,9956 | 0,9701 | 0,3866 | 0,0008 |
+  | Puntaje crudo máximo en validación, en valor absoluto | 122 | 1.285 | 17.484 | 79.355 | 31 millones |
+
+  En la primera iteración el modelo ya ordena casi perfecto, y después los puntajes crudos
+  crecen sin cota y el PR-AUC colapsa **también en entrenamiento**. Por eso no es sobreajuste y
+  no es el arnés midiendo mal: es el entrenamiento que se va. Por qué los valores por defecto
+  divergen en estos datos (pasos de Newton sin cota sobre una clase rara y casi separable) es
+  una hipótesis no medida.
+- **Consecuencia sobre el control, que es lo importante:** un modelo que no aprende la
+  etiqueta verdadera tampoco aprendería una filtrada, así que **el paso de LightGBM por el test
+  de permutación no prueba nada**. El control se sostiene en los dos detectores que sí
+  aprenden: la regresión logística (0,0050 permutado contra 0,9967 real) y Random Forest
+  (0,00082 contra 0,9983). Está escrito en EVAL-004 (nota de estado) y en EVAL-008.
+- **Cómo se detectó:** la evaluación de los modelos con etiquetas reales, corrida después del
+  test de permutación. Un resultado de cero en un modelo que debería aprender al menos la firma
+  no se registró sin diagnóstico.
+- **Corrección:** ninguna en el modelo; ajustar los hiperparámetros es el turno 2B. El
+  docstring de `scripts/run_leakage_check.py`, que llamaba a LightGBM "el detector más
+  sensible", se corrigió.
+- **Defensa:** nivel 3 de `docs/METHODOLOGY.md`, sección 6.5: está escrito aquí. La defensa
+  que falta es de método: un detector de fuga se valida antes con las etiquetas reales,
+  porque si no aprende, su paso por el test no tiene poder.
+- **Aprendizaje:** el control de un test necesita su propio control positivo. Es
+  `docs/METHODOLOGY.md`, sección 6.1, aplicada al detector: una métrica que no puede fallar no
+  prueba nada, y un detector que no puede detectar, tampoco.
+- **Referencias:** EVAL-004, EVAL-008, ERR-013.
+- **Pendiente:** versionar la medición por iteración. Hasta entonces, sus cifras son de este
+  cuaderno de laboratorio y no sostienen ningún documento entregable.

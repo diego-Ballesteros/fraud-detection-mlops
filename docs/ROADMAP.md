@@ -318,7 +318,9 @@ direcciones, con las mismas reglas.
 | `prepare_data.py` | CSV → dos parquet, validación y mediciones | existe |
 | `run_training.py` | El AutoML | fase 2 |
 | `run_default_models.py` | Los baselines y las tres familias con hiperparámetros por defecto, por los dos splitters | existe |
-| `run_leakage_check.py` | La prueba del objetivo barajado; es de la fase 2 porque necesita un modelo contra el que barajar | existe |
+| `run_leakage_check.py` | La prueba del objetivo barajado, como test de permutación con el clasificador aleatorio como control; es de la fase 2 porque necesita un modelo contra el que barajar | existe |
+| `diagnose_head.py` | Qué tiene la cabeza del ranking de un modelo permutado (ERR-013) | existe |
+| `diagnose_ap.py` | De qué bloques de puntaje sale el PR-AUC de un modelo permutado (ERR-013) | existe |
 | `run_interpretability.py` | — | fase 3 |
 | `run_monitoring.py` | Genera el reporte HTML | fase 4 |
 

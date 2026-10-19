@@ -7,11 +7,12 @@ import sys
 import numpy as np
 import pandas as pd
 import pytest
+from sklearn.pipeline import Pipeline
 
 from fraud_detection import settings
 from fraud_detection.models import estimators
 from fraud_detection.models.baseline import SignatureRule
-from fraud_detection.models.estimators import MODEL_SPECS, UniformRandomScores
+from fraud_detection.models.estimators import MODEL_SPECS, UniformRandomScores, splits_on
 from fraud_detection.models.evaluation import derived_seeds
 
 
@@ -110,3 +111,33 @@ def test_the_random_classifier_spec_survives_the_trip_to_a_child_process() -> No
     assert restored.model().random_state == settings.RANDOM_STATE
     assert not restored.learns_from_labels
     assert "random_classifier" not in MODEL_SPECS
+
+
+def _fitted(model: object) -> Pipeline:
+    from tests.test_evaluation import synthetic_frame
+
+    frame = synthetic_frame()
+    pipeline = Pipeline([("preprocess", estimators.full_preprocessor()), ("model", model)])
+    return pipeline.fit(frame.drop(columns=["isFraud"]), frame["isFraud"])
+
+
+def test_splits_on_counts_tree_splits_and_says_none_for_a_linear_model() -> None:
+    from lightgbm import LGBMClassifier
+    from sklearn.ensemble import RandomForestClassifier
+    from sklearn.linear_model import LogisticRegression
+
+    booster = _fitted(
+        LGBMClassifier(
+            n_estimators=10, min_child_samples=5, verbose=-1, random_state=settings.RANDOM_STATE
+        )
+    )
+    forest = _fitted(RandomForestClassifier(n_estimators=5, random_state=settings.RANDOM_STATE))
+    # The synthetic data has only TRANSFER and PAYMENT, so the DEBIT column is constant and
+    # no tree can split on it: the negative control. Every positive is a TRANSFER and every
+    # negative a PAYMENT, so the trees separate the classes on the type columns.
+    for model in (booster, forest):
+        assert splits_on(model, "type_DEBIT") == 0
+        assert splits_on(model, "type_TRANSFER") + splits_on(model, "type_PAYMENT") > 0
+    assert splits_on(_fitted(LogisticRegression()), "amount") is None
+    with pytest.raises(ValueError, match="not among the features"):
+        splits_on(booster, "step")

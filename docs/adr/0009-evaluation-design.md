@@ -113,3 +113,77 @@ tiene entre 408 y 465, a unos 2.
 - *Cuando un fold no colapsa*, `scripts/run_leakage_check.py` muestra además cuántos
   positivos barajados cayeron en filas de entrenamiento con la firma, frente a los
   esperados. Ahí se separa el azar de la fuga; el veredicto no cambia.
+
+---
+
+**Nota de estado (2026-10-18, fase 2): el criterio de colapso cambió dos veces después de
+verlo fallar.** Reemplaza el margen de la sección 5, que no se reescribe.
+
+**Primer cambio, del Arquitecto.** Con una sola permutación, el margen de la sección 5 falló:
+LightGBM, fold 2, 14,83 veces la prevalencia (EVAL-002). En palabras del Arquitecto: *"lo
+estoy cambiando después de ver que el anterior falló"*. Sus dos razones:
+
+- La razón del cambio es la forma de la métrica —un cociente a prevalencia 7,6e-4 es
+  hipersensible por construcción—, no el valor 14,83.
+- La protección no es el umbral nuevo: es la distribución de permutaciones. Con veinte valores
+  medidos en el orden de 1e-2 y etiquetas reales en ~0,98, dónde se traza la línea entre
+  medio no sostiene la conclusión. El resultado se hace robusto al umbral en vez de defender
+  el umbral.
+
+El criterio nuevo: 20 permutaciones del mismo modelo; el PR-AUC máximo de las 20 por debajo de
+**0,05 en valor absoluto**; y la distribución del ROC-AUC conteniendo 0,5 sin elevación
+sistemática.
+
+La comparación de escalas, del Arquitecto: una fuga que recupera la etiqueta deja el PR-AUC
+en el rango 0,5–1,0; la firma con etiquetas reales da ~0,98; el máximo medido bajo
+permutación es 0,0112 (EVAL-004). Entre el peor caso del ruido y el mejor caso de una fuga
+hay más de un orden de magnitud de separación.
+
+**Segundo cambio, del Arquitecto, sobre la operacionalización del Ejecutor.** El Ejecutor
+operacionalizó la condición del ROC-AUC antes de medir: R1, 0,5 dentro de [mín, máx] de la
+familia; R2, la mediana de la familia no supera el máximo del clasificador aleatorio. Medido,
+la regresión logística no pasó R2 (0,545 contra 0,5395) y Random Forest no pasó R1 (sus cinco
+valores, de 0,501 a 0,514). El Arquitecto retiró las dos, y **el defecto es formal, no del
+resultado**: R2 compara una mediana contra un estadístico de orden extremo de otra
+distribución, que no son cantidades comparables; R1 prueba el signo de una desviación con
+n = 5 e ignora su magnitud, y cinco valores del mismo lado de 0,5 bajo un nulo simétrico es un
+evento del 3%. Las dos son afirmaciones sobre la construcción del test, no sobre lo que
+devolvió.
+
+**Es la segunda vez en esta fase que el Arquitecto cambia un criterio después de verlo
+fallar.** El correctivo es que la referencia sea el nulo empírico medido, y no un criterio
+inventado.
+
+La condición nueva del ROC-AUC: la mediana bajo permutación cae dentro del rango observado
+del clasificador aleatorio (0,470–0,539) o por debajo. Por debajo no es fuga: es
+anti-generalización. LightGBM pasa (0,242), Random Forest pasa (0,504), y la regresión
+logística queda apenas afuera (0,545 contra 0,539). Se acepta, y el hueco queda escrito como
+hueco:
+
+- Por magnitud no es fuga: 0,045 de elevación con PR-AUC ≤ 0,005, contra una fuga que daría
+  ROC-AUC ~1,0 y PR-AUC ~0,98.
+- No existe camino en el diseño: los folds son disjuntos por step, y un test lo afirma.
+- **El mecanismo queda sin determinar.** Hipótesis no medida: el barajado es solo del
+  entrenamiento, la validación conserva sus etiquetas reales, y el ranking de un modelo
+  lineal es una función suave de las features; si la dirección del vector de coeficientes
+  ajustado sobre ruido no es de signo aleatorio entre permutaciones, el ranking correlaciona
+  débilmente con la relación verdadera.
+
+**El nulo correcto, del Arquitecto.** El nulo de un test de objetivo barajado es una
+permutación del mismo modelo, nunca una línea base aleatoria. El clasificador aleatorio acota
+la inflación por escasez de positivos; la permutación acota la inflación por estructura. Son
+cotas de cosas distintas, y la que importaba era la segunda. Medido, el aleatorio es el piso
+de inflación por escasez: mediana de 1,02 veces la prevalencia y máximo de 1,50 en 100
+sorteos (EVAL-003). Eso descarta la escasez como explicación de 14,83 y señala a la
+estructura del ranking (ERR-013).
+
+**Decisiones del Ejecutor en este cambio**, a su nombre:
+
+- Las semillas son `settings.RANDOM_STATE + i`, para i de 0 a 19 (`derived_seeds`). La 0 es
+  la permutación original, y que la reproduzca exactamente (0,011227402) es el control de
+  determinismo del test.
+- Cada test de permutación es una corrida padre en MLflow con una corrida hija por sorteo; el
+  padre lleva la distribución.
+- El clasificador aleatorio (`UniformRandomScores`) vive en `estimators.py`, pero fuera de
+  `MODEL_SPECS`: es un control, no uno de los modelos evaluados.
+- R1 y R2, retiradas arriba.

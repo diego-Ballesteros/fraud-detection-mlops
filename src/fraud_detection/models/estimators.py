@@ -173,6 +173,32 @@ def random_classifier_spec(seed: int) -> ModelSpec:
     )
 
 
+def splits_on(estimator: Pipeline, feature: str) -> int | None:
+    """Count the tree splits on one feature of a fitted Pipeline.
+
+    Args:
+        estimator: A fitted Pipeline whose last step is LightGBM or a scikit-learn forest.
+        feature: Name of a feature the preprocessing step outputs.
+
+    Returns:
+        The number of split nodes on that feature over every tree, or None when the model
+        has no trees.
+
+    Raises:
+        ValueError: If the preprocessing step does not output the feature.
+    """
+    names = list(estimator[:-1].get_feature_names_out())
+    if feature not in names:
+        raise ValueError(f"{feature!r} is not among the features {names}")
+    index = names.index(feature)
+    model = estimator[-1]
+    if hasattr(model, "booster_"):
+        return int(model.booster_.feature_importance(importance_type="split")[index])
+    if hasattr(model, "estimators_"):
+        return int(sum((tree.tree_.feature == index).sum() for tree in model.estimators_))
+    return None
+
+
 MODEL_SPECS: Final[Mapping[str, ModelSpec]] = MappingProxyType(
     {
         spec.name: spec

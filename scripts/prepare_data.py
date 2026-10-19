@@ -14,6 +14,7 @@ cut reserves the production period for phase 4, and this script never reads its 
 back: production is counted from its parquet footer.
 """
 
+import sys
 import time
 from typing import Final
 
@@ -244,6 +245,8 @@ def main() -> int:
     Returns:
         0 when every step ran, 1 when the validation found a blocking problem.
     """
+    # The project's standard defense (ERR-012): redirected, stdout on Windows is cp1252.
+    sys.stdout.reconfigure(encoding="utf-8")
     started = time.perf_counter()
     pd.set_option("display.width", 200)
     pd.set_option("display.max_columns", None)

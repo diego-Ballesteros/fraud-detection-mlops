@@ -20,6 +20,7 @@ from sklearn.preprocessing import FunctionTransformer
 from fraud_detection import settings
 from fraud_detection.data.schema import COLUMNS, TARGET_COLUMN
 from fraud_detection.models import estimators, evaluation
+from fraud_detection.models.baseline import SignatureRule
 from fraud_detection.models.evaluation import (
     Aggregate,
     ExpandingStepSplit,
@@ -509,3 +510,53 @@ def test_the_head_of_a_ranking_counts_positives_and_marked_ones() -> None:
     # The 3rd score is tied with the 4th: both are in, never split.
     assert heads[2] == RankingHead(k=3, flagged=4, positives=3, marked_positives=2)
     assert heads[3] == RankingHead(k=5, flagged=5, positives=4, marked_positives=2)
+
+
+def test_average_precision_splits_into_its_blocks() -> None:
+    # One block of three tied rows (2 positives), then one negative row.
+    blocks = evaluation.average_precision_by_block(_y(1, 1, 0, 0), _s(0.9, 0.9, 0.9, 0.5))
+    assert blocks["rows"].tolist() == [3, 1]
+    assert blocks["positives"].tolist() == [2, 0]
+    assert blocks["contribution"].tolist() == pytest.approx([2 / 3, 0.0])
+    assert blocks["contribution"].sum() == pytest.approx(
+        average_precision_score(_y(1, 1, 0, 0), _s(0.9, 0.9, 0.9, 0.5))
+    )
+
+
+def test_the_block_contributions_add_up_to_scikit_learn_on_random_ties() -> None:
+    rng = np.random.default_rng(0)
+    for _ in range(30):
+        labels = (rng.random(400) < 0.1).astype(int)
+        labels[0] = 1
+        scores = np.round(rng.random(400), 1)
+        blocks = evaluation.average_precision_by_block(labels, scores)
+        assert blocks["contribution"].sum() == pytest.approx(
+            average_precision_score(labels, scores), rel=1e-12
+        )
+        assert blocks["rows"].sum() == len(labels)
+
+
+@pytest.mark.usefixtures("spies")
+def test_one_refitted_fold_has_the_scores_behind_the_harness_metrics(frame: pd.DataFrame) -> None:
+    seed = evaluation.derived_seeds(2)[1]
+    harness = cross_validate(
+        frame,
+        ExpandingStepSplit(),
+        FunctionTransformer,
+        SpyClassifier,
+        shuffle_training_labels=True,
+        shuffle_seed=seed,
+    )
+    refitted = evaluation.score_one_fold(
+        frame,
+        ExpandingStepSplit(),
+        3,
+        FunctionTransformer,
+        SpyClassifier,
+        shuffle_training_labels=True,
+        shuffle_seed=seed,
+    )
+    rule = SignatureRule().predict(refitted.validation)
+    assert score_fold(refitted.labels, refitted.scores, rule) == harness[2].metrics
+    assert len(refitted.labels) == harness[2].validation_rows
+    assert TARGET_COLUMN not in refitted.validation.columns
