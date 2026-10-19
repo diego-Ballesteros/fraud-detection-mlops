@@ -8,6 +8,12 @@ limit. The folds finished before the abort are kept and reported.
 The child calls ``evaluation.cross_validate``, the same function the in-process harness
 uses: a guarded run is not a separate path. It also loads its own data, so the parent
 holds no copy of the rows while the child fits.
+
+The child is **not** a daemon. joblib refuses to parallelize inside a daemonic process
+(``effective_n_jobs`` returns 1 with "Loky-backed parallel loops cannot be called in a
+multiprocessing"), and that silently ran Random Forest's ``predict`` on one thread. A
+daemon child would die with the parent; instead, the parent kills the child in a
+``finally`` whatever ends the watch, an interruption included.
 """
 
 import multiprocessing
@@ -20,6 +26,7 @@ from typing import Any, Final
 
 import pandas as pd
 
+from fraud_detection.config import settings
 from fraud_detection.models.estimators import ModelSpec
 from fraud_detection.models.evaluation import (
     FIT_FINISHED,
@@ -68,6 +75,7 @@ def _child(
     splitter: Splitter,
     spec: ModelSpec,
     shuffle_training_labels: bool,
+    shuffle_seed: int,
 ) -> None:
     """Load the data, cross-validate, and report every event to the parent."""
     try:
@@ -77,6 +85,7 @@ def _child(
             spec.preprocessor,
             spec.model,
             shuffle_training_labels=shuffle_training_labels,
+            shuffle_seed=shuffle_seed,
             on_event=messages.put,
         )
         messages.put((_DONE, None))
@@ -90,6 +99,7 @@ def run_guarded(
     spec: ModelSpec,
     *,
     shuffle_training_labels: bool = False,
+    shuffle_seed: int = settings.RANDOM_STATE,
     fit_time_limit: float = FIT_TIME_LIMIT_SECONDS,
     poll_seconds: float = 1.0,
 ) -> GuardedRun:
@@ -100,6 +110,7 @@ def run_guarded(
         splitter: Picklable splitter.
         spec: The model and its preprocessor, as factories.
         shuffle_training_labels: Passed to ``cross_validate``.
+        shuffle_seed: Passed to ``cross_validate``.
         fit_time_limit: Seconds a single fit may run.
         poll_seconds: How often the parent checks the clock and the child.
 
@@ -110,8 +121,8 @@ def run_guarded(
     messages = context.Queue()
     child = context.Process(
         target=_child,
-        args=(messages, load_frame, splitter, spec, shuffle_training_labels),
-        daemon=True,
+        args=(messages, load_frame, splitter, spec, shuffle_training_labels, shuffle_seed),
+        daemon=False,
     )
     started = time.monotonic()
     child.start()
@@ -136,31 +147,37 @@ def run_guarded(
             wall_seconds=time.monotonic() - started,
         )
 
-    while True:
-        try:
-            message = messages.get(timeout=poll_seconds)
-        except queue.Empty:
-            now = time.monotonic()
-            if fit_started_at is not None and now - fit_started_at > fit_time_limit:
-                child.terminate()
-                return finish(aborted_fold=current_fold, aborted_after=now - fit_started_at)
-            if not child.is_alive():
-                # A message put just before dying may still be in flight.
-                try:
-                    message = messages.get(timeout=poll_seconds)
-                except queue.Empty:
-                    return finish(error=f"Child exited with code {child.exitcode}, no report")
-            else:
+    try:
+        while True:
+            try:
+                message = messages.get(timeout=poll_seconds)
+            except queue.Empty:
+                now = time.monotonic()
+                if fit_started_at is not None and now - fit_started_at > fit_time_limit:
+                    child.terminate()
+                    return finish(aborted_fold=current_fold, aborted_after=now - fit_started_at)
+                if not child.is_alive():
+                    # A message put just before dying may still be in flight.
+                    try:
+                        message = messages.get(timeout=poll_seconds)
+                    except queue.Empty:
+                        return finish(error=f"Child exited with code {child.exitcode}, no report")
+                else:
+                    continue
+            if isinstance(message, FoldEvent):
+                if message.kind == FIT_STARTED:
+                    current_fold, fit_started_at = message.fold, time.monotonic()
+                elif message.kind == FIT_FINISHED:
+                    fit_started_at = None
+                elif message.kind == FOLD_DONE and message.result is not None:
+                    folds.append(message.result)
                 continue
-        if isinstance(message, FoldEvent):
-            if message.kind == FIT_STARTED:
-                current_fold, fit_started_at = message.fold, time.monotonic()
-            elif message.kind == FIT_FINISHED:
-                fit_started_at = None
-            elif message.kind == FOLD_DONE and message.result is not None:
-                folds.append(message.result)
-            continue
-        kind, payload = message
-        if kind == _DONE:
-            return finish()
-        return finish(error=str(payload))
+            kind, payload = message
+            if kind == _DONE:
+                return finish()
+            return finish(error=str(payload))
+    finally:
+        # Not a daemon, so it would outlive the parent: never leave it running.
+        if child.is_alive():
+            child.kill()
+            child.join()

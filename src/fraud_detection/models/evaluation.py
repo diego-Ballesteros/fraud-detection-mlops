@@ -79,6 +79,9 @@ EVALUATION_COLUMNS: Final[tuple[str, ...]] = (*ELIGIBLE_COLUMNS, TARGET_COLUMN)
 # 0.99 is exactly 99/100 and the comparison against tp / flagged is done in integers.
 _MAX_FLOOR_DENOMINATOR: Final[int] = 10**6
 
+PERMUTATIONS: Final[int] = 20
+"""Draws per permutation test and per random-classifier null (ADR 0009, status note)."""
+
 FIT_STARTED: Final[str] = "fit_started"
 FIT_FINISHED: Final[str] = "fit_finished"
 FOLD_DONE: Final[str] = "fold_done"
@@ -369,6 +372,94 @@ def precision_at_recall(
     )
 
 
+@dataclass(frozen=True)
+class RankingHead:
+    """What the top of a ranking holds.
+
+    Attributes:
+        k: Rank asked for.
+        flagged: Rows whose score is at least the k-th highest score; more than ``k`` when
+            the k-th score is tied, because a tie is never split.
+        positives: Positive rows among them.
+        marked_positives: Positive rows among them that are also marked (for example, rows
+            with the signature).
+    """
+
+    k: int
+    flagged: int
+    positives: int
+    marked_positives: int
+
+
+def ranking_head(
+    labels: np.ndarray, scores: np.ndarray, marked: np.ndarray, ks: tuple[int, ...]
+) -> tuple[RankingHead, ...]:
+    """Count positives, and marked positives, among the top ``k`` rows of a ranking.
+
+    Same tie rule as ``recall_at_precision``: the cut is the threshold of the k-th row, so
+    every row tied with it is in.
+
+    Args:
+        labels: 0/1 labels.
+        scores: Scores, higher meaning more likely positive.
+        marked: Boolean mark per row.
+        ks: Ranks to report, each between 1 and the number of rows.
+
+    Returns:
+        One ``RankingHead`` per ``k``, in the order given.
+    """
+    y = np.asarray(labels)
+    s = np.asarray(scores, dtype=float)
+    mark = np.asarray(marked).astype(bool)
+    ranked = np.sort(s)[::-1]
+    heads = []
+    for k in ks:
+        flagged = s >= ranked[k - 1]
+        heads.append(
+            RankingHead(
+                k=k,
+                flagged=int(flagged.sum()),
+                positives=int(y[flagged].sum()),
+                marked_positives=int(y[flagged & mark].sum()),
+            )
+        )
+    return tuple(heads)
+
+
+def average_precision_by_block(labels: np.ndarray, scores: np.ndarray) -> pd.DataFrame:
+    """Split average precision into the contribution of each block of tied scores.
+
+    Average precision is ``sum over thresholds of (R_n - R_(n-1)) * P_n``, and each
+    threshold is one block of tied scores, so each block's contribution can be read
+    directly. The contributions add up to scikit-learn's ``average_precision_score``.
+
+    Args:
+        labels: 0/1 labels.
+        scores: Scores, higher meaning more likely positive.
+
+    Returns:
+        One row per block, highest score first: ``threshold``, ``rows`` and ``positives``
+        in the block, ``flagged`` and ``true_positives`` down to and including it, the
+        ``precision`` and ``recall`` there, and the block's ``contribution``.
+    """
+    thresholds, flagged, true_positives = _threshold_curve(labels, scores)
+    positives = true_positives[-1]
+    block_positives = np.diff(true_positives, prepend=0)
+    precision = true_positives / flagged
+    return pd.DataFrame(
+        {
+            "threshold": thresholds,
+            "rows": np.diff(flagged, prepend=0),
+            "positives": block_positives,
+            "flagged": flagged,
+            "true_positives": true_positives,
+            "precision": precision,
+            "recall": true_positives / positives,
+            "contribution": block_positives / positives * precision,
+        }
+    )
+
+
 def floor_key(floor: float) -> str:
     """Name fragment of a precision floor in metric names, e.g. ``p0.99``."""
     return f"p{floor:.2f}"
@@ -566,16 +657,33 @@ def features_and_labels(frame: pd.DataFrame) -> tuple[pd.DataFrame, np.ndarray]:
     return frame.drop(columns=[TARGET_COLUMN]), frame[TARGET_COLUMN].to_numpy(dtype=np.int64)
 
 
-def shuffled_labels(labels: np.ndarray) -> np.ndarray:
-    """Permute labels with ``settings.RANDOM_STATE``; the class counts stay exactly equal.
+def derived_seeds(count: int) -> tuple[int, ...]:
+    """Seeds for repeated draws: ``settings.RANDOM_STATE + i`` for ``i`` in ``0 .. count - 1``.
+
+    The first is ``settings.RANDOM_STATE`` itself, so draw 0 reproduces every single-draw
+    result measured before. numpy turns an integer seed into a stream through
+    ``SeedSequence``, which hashes it, so consecutive integers give unrelated streams.
+
+    Args:
+        count: How many seeds.
+
+    Returns:
+        The seeds, in order.
+    """
+    return tuple(settings.RANDOM_STATE + offset for offset in range(count))
+
+
+def shuffled_labels(labels: np.ndarray, seed: int = settings.RANDOM_STATE) -> np.ndarray:
+    """Permute labels; the class counts stay exactly equal.
 
     Args:
         labels: Labels to permute.
+        seed: Seed of the permutation; one of ``derived_seeds`` when repeating the test.
 
     Returns:
         A new array with the same values in a different order.
     """
-    return np.random.default_rng(settings.RANDOM_STATE).permutation(labels)
+    return np.random.default_rng(seed).permutation(labels)
 
 
 def _step_range(frame: pd.DataFrame) -> tuple[int, int]:
@@ -588,7 +696,22 @@ def _warning_text(caught: list[warnings.WarningMessage]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(texts))
 
 
-def evaluate_fold(
+@dataclass(frozen=True)
+class _FittedFold:
+    """A fold after fitting and scoring: what both evaluate_fold and score_one_fold need."""
+
+    estimator: Pipeline
+    train: pd.DataFrame
+    train_labels: np.ndarray
+    validation: pd.DataFrame
+    validation_labels: np.ndarray
+    scores: np.ndarray
+    fit_seconds: float
+    predict_seconds: float
+    fit_warnings: tuple[str, ...]
+
+
+def _fit_and_score(
     features: pd.DataFrame,
     labels: np.ndarray,
     train_index: np.ndarray,
@@ -597,39 +720,19 @@ def evaluate_fold(
     model: EstimatorFactory,
     *,
     fold: int,
-    shuffle_training_labels: bool = False,
-    on_event: Callable[[FoldEvent], None] | None = None,
-) -> FoldResult:
-    """Fit a fresh Pipeline on the training rows and score the validation rows.
-
-    Args:
-        features: Every row, without the label column.
-        labels: Every row's 0/1 label.
-        train_index: Positions of the training rows.
-        validation_index: Positions of the validation rows.
-        preprocessor: Factory of the preprocessing step; called once, here.
-        model: Factory of the classifier; called once, here.
-        fold: Fold number, for the result and the events.
-        shuffle_training_labels: Permute the training labels before fitting.
-        on_event: Called with ``FIT_STARTED`` and ``FIT_FINISHED`` around ``fit``.
-
-    Returns:
-        The fold's sizes, timings and metrics.
-
-    Raises:
-        ValueError: If the training labels do not hold both classes.
-    """
+    shuffle_training_labels: bool,
+    shuffle_seed: int,
+    on_event: Callable[[FoldEvent], None] | None,
+) -> _FittedFold:
+    """Fit a fresh Pipeline on the training rows and score the validation rows."""
     notify = on_event or (lambda _event: None)
     train = features.iloc[train_index]
     validation = features.iloc[validation_index]
     train_labels = labels[train_index]
-    validation_labels = labels[validation_index]
     if shuffle_training_labels:
-        train_labels = shuffled_labels(train_labels)
+        train_labels = shuffled_labels(train_labels, shuffle_seed)
     if set(np.unique(train_labels).tolist()) != {0, 1}:
         raise ValueError(f"Fold {fold}: the training labels must hold both classes")
-    signature_inputs = list(DERIVATION_INPUTS[SIGNATURE_FEATURE])
-    signature = amount_equals_origin_balance(train[signature_inputs]).to_numpy()
 
     estimator = Pipeline([("preprocess", preprocessor()), ("model", model())])
     notify(FoldEvent(FIT_STARTED, fold))
@@ -643,24 +746,145 @@ def evaluate_fold(
     started = time.perf_counter()
     probabilities = estimator.predict_proba(validation)
     predict_seconds = time.perf_counter() - started
-    scores = probabilities[:, list(estimator.classes_).index(1)]
-    baseline_flags = SignatureRule().predict(validation)
-    return FoldResult(
-        fold=fold,
-        train_rows=len(train),
-        train_positives=int(train_labels.sum()),
-        validation_rows=len(validation),
-        validation_positives=int(validation_labels.sum()),
-        train_steps=_step_range(train),
-        validation_steps=_step_range(validation),
-        train_signature_rows=int(signature.sum()),
-        train_signature_positives=int(train_labels[signature].sum()),
-        label_shuffled=shuffle_training_labels,
+    return _FittedFold(
+        estimator=estimator,
+        train=train,
+        train_labels=train_labels,
+        validation=validation,
+        validation_labels=labels[validation_index],
+        scores=probabilities[:, list(estimator.classes_).index(1)],
         fit_seconds=fit_seconds,
         predict_seconds=predict_seconds,
         fit_warnings=_warning_text(caught),
-        metrics=score_fold(validation_labels, scores, baseline_flags),
     )
+
+
+def evaluate_fold(
+    features: pd.DataFrame,
+    labels: np.ndarray,
+    train_index: np.ndarray,
+    validation_index: np.ndarray,
+    preprocessor: EstimatorFactory,
+    model: EstimatorFactory,
+    *,
+    fold: int,
+    shuffle_training_labels: bool = False,
+    shuffle_seed: int = settings.RANDOM_STATE,
+    on_event: Callable[[FoldEvent], None] | None = None,
+) -> FoldResult:
+    """Fit a fresh Pipeline on the training rows and score the validation rows.
+
+    Args:
+        features: Every row, without the label column.
+        labels: Every row's 0/1 label.
+        train_index: Positions of the training rows.
+        validation_index: Positions of the validation rows.
+        preprocessor: Factory of the preprocessing step; called once, here.
+        model: Factory of the classifier; called once, here.
+        fold: Fold number, for the result and the events.
+        shuffle_training_labels: Permute the training labels before fitting.
+        shuffle_seed: Seed of that permutation.
+        on_event: Called with ``FIT_STARTED`` and ``FIT_FINISHED`` around ``fit``.
+
+    Returns:
+        The fold's sizes, timings and metrics.
+
+    Raises:
+        ValueError: If the training labels do not hold both classes.
+    """
+    fitted = _fit_and_score(
+        features,
+        labels,
+        train_index,
+        validation_index,
+        preprocessor,
+        model,
+        fold=fold,
+        shuffle_training_labels=shuffle_training_labels,
+        shuffle_seed=shuffle_seed,
+        on_event=on_event,
+    )
+    signature_inputs = list(DERIVATION_INPUTS[SIGNATURE_FEATURE])
+    signature = amount_equals_origin_balance(fitted.train[signature_inputs]).to_numpy()
+    baseline_flags = SignatureRule().predict(fitted.validation)
+    return FoldResult(
+        fold=fold,
+        train_rows=len(fitted.train),
+        train_positives=int(fitted.train_labels.sum()),
+        validation_rows=len(fitted.validation),
+        validation_positives=int(fitted.validation_labels.sum()),
+        train_steps=_step_range(fitted.train),
+        validation_steps=_step_range(fitted.validation),
+        train_signature_rows=int(signature.sum()),
+        train_signature_positives=int(fitted.train_labels[signature].sum()),
+        label_shuffled=shuffle_training_labels,
+        fit_seconds=fitted.fit_seconds,
+        predict_seconds=fitted.predict_seconds,
+        fit_warnings=fitted.fit_warnings,
+        metrics=score_fold(fitted.validation_labels, fitted.scores, baseline_flags),
+    )
+
+
+@dataclass(frozen=True)
+class FoldScores:
+    """One fold refitted to inspect its ranking, by the same code path as ``evaluate_fold``.
+
+    Attributes:
+        estimator: The fitted Pipeline.
+        validation: The validation rows, without the label.
+        labels: Their true labels.
+        scores: The model's scores for the positive class.
+    """
+
+    estimator: Pipeline
+    validation: pd.DataFrame
+    labels: np.ndarray
+    scores: np.ndarray
+
+
+def score_one_fold(
+    frame: pd.DataFrame,
+    splitter: Splitter,
+    fold: int,
+    preprocessor: EstimatorFactory,
+    model: EstimatorFactory,
+    *,
+    shuffle_training_labels: bool = False,
+    shuffle_seed: int = settings.RANDOM_STATE,
+) -> FoldScores:
+    """Refit one fold and keep its scores, which ``cross_validate`` does not return.
+
+    It runs the same fit-and-score step as ``evaluate_fold``, so the scores are those that
+    produced the fold's metrics: diagnostics read the ranking of the evaluated model, not of
+    a copy.
+
+    Args:
+        frame: Rows with the label column.
+        splitter: The splitter of the evaluation.
+        fold: Fold number, from 1.
+        preprocessor: Factory of the preprocessing step.
+        model: Factory of the classifier.
+        shuffle_training_labels: Permute the training labels, as in the permutation test.
+        shuffle_seed: Seed of that permutation.
+
+    Returns:
+        The fitted Pipeline, the validation rows, their labels and their scores.
+    """
+    features, labels = features_and_labels(frame)
+    train_index, validation_index = list(splitter.split(features, labels))[fold - 1]
+    fitted = _fit_and_score(
+        features,
+        labels,
+        train_index,
+        validation_index,
+        preprocessor,
+        model,
+        fold=fold,
+        shuffle_training_labels=shuffle_training_labels,
+        shuffle_seed=shuffle_seed,
+        on_event=None,
+    )
+    return FoldScores(fitted.estimator, fitted.validation, fitted.validation_labels, fitted.scores)
 
 
 def cross_validate(
@@ -670,6 +894,7 @@ def cross_validate(
     model: EstimatorFactory,
     *,
     shuffle_training_labels: bool = False,
+    shuffle_seed: int = settings.RANDOM_STATE,
     on_event: Callable[[FoldEvent], None] | None = None,
 ) -> tuple[FoldResult, ...]:
     """Evaluate a model on every fold of a splitter.
@@ -681,6 +906,7 @@ def cross_validate(
         model: Factory of the classifier, called once per fold.
         shuffle_training_labels: Permute the training labels of every fold before fitting;
             validation labels are never touched.
+        shuffle_seed: Seed of the permutation, the same for every fold.
         on_event: Called around each fit and with ``FOLD_DONE`` after each fold.
 
     Returns:
@@ -701,6 +927,7 @@ def cross_validate(
             model,
             fold=fold,
             shuffle_training_labels=shuffle_training_labels,
+            shuffle_seed=shuffle_seed,
             on_event=notify,
         )
         results.append(result)

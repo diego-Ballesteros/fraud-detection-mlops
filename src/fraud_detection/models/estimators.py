@@ -23,9 +23,12 @@ which lightgbm versions it affects).
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from functools import partial
 from types import MappingProxyType
 from typing import Any, Final
 
+import numpy as np
+from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.dummy import DummyClassifier
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
@@ -33,6 +36,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import FunctionTransformer
 
 from fraud_detection.config import settings
+from fraud_detection.data.schema import BINARY_VALUES
 from fraud_detection.features.pipeline import build_preprocessor
 from fraud_detection.models.baseline import SignatureRule
 from fraud_detection.models.evaluation import EstimatorFactory
@@ -105,6 +109,94 @@ class ModelSpec:
     preprocessor: EstimatorFactory
     model: EstimatorFactory
     learns_from_labels: bool
+
+
+class UniformRandomScores(ClassifierMixin, BaseEstimator):
+    """Score every row with an independent uniform draw: a ranking with no model behind it.
+
+    It is the null reference of the permutation test. Its PR-AUC is what a ranking that
+    knows nothing reaches on these labels, including the upward bias of few positives, so
+    the shuffled-label models are compared against a measured distribution, not against the
+    prevalence alone. ``fit`` records nothing.
+    """
+
+    classes_: Final = np.asarray(BINARY_VALUES)
+
+    def __init__(self, random_state: int = settings.RANDOM_STATE) -> None:
+        """Set the seed of the draws.
+
+        Args:
+            random_state: Seed; one of ``evaluation.derived_seeds`` when repeating.
+        """
+        self.random_state = random_state
+
+    def fit(self, X: Any, y: Any = None) -> "UniformRandomScores":  # noqa: N803
+        """Record nothing.
+
+        Args:
+            X: Rows, ignored.
+            y: Labels, ignored.
+
+        Returns:
+            The object itself, unchanged.
+        """
+        return self
+
+    def __sklearn_is_fitted__(self) -> bool:
+        """Report the object as fitted: it has nothing to learn."""
+        return True
+
+    def predict_proba(self, X: Any) -> np.ndarray:  # noqa: N803
+        """Draw one uniform score per row.
+
+        Args:
+            X: Rows; only their number is used.
+
+        Returns:
+            One row per input row, with the probabilities of classes 0 and 1.
+        """
+        positive = np.random.default_rng(self.random_state).random(len(X))
+        return np.column_stack([1.0 - positive, positive])
+
+
+def random_classifier_spec(seed: int) -> ModelSpec:
+    """The random classifier with one seed, as the harness sees it.
+
+    Args:
+        seed: Seed of the draws.
+
+    Returns:
+        A spec named ``random_classifier`` that reads the raw rows.
+    """
+    return ModelSpec(
+        "random_classifier", raw_rows, partial(UniformRandomScores, random_state=seed), False
+    )
+
+
+def splits_on(estimator: Pipeline, feature: str) -> int | None:
+    """Count the tree splits on one feature of a fitted Pipeline.
+
+    Args:
+        estimator: A fitted Pipeline whose last step is LightGBM or a scikit-learn forest.
+        feature: Name of a feature the preprocessing step outputs.
+
+    Returns:
+        The number of split nodes on that feature over every tree, or None when the model
+        has no trees.
+
+    Raises:
+        ValueError: If the preprocessing step does not output the feature.
+    """
+    names = list(estimator[:-1].get_feature_names_out())
+    if feature not in names:
+        raise ValueError(f"{feature!r} is not among the features {names}")
+    index = names.index(feature)
+    model = estimator[-1]
+    if hasattr(model, "booster_"):
+        return int(model.booster_.feature_importance(importance_type="split")[index])
+    if hasattr(model, "estimators_"):
+        return int(sum((tree.tree_.feature == index).sum() for tree in model.estimators_))
+    return None
 
 
 MODEL_SPECS: Final[Mapping[str, ModelSpec]] = MappingProxyType(
