@@ -152,3 +152,17 @@ def test_run_tags_say_what_was_evaluated() -> None:
         "false",
         "none",
     )
+
+
+def test_a_nested_run_hangs_from_the_active_run(store: str) -> None:
+    run = GuardedRun(
+        folds=(fold(1, 0.2),),
+        aborted_fold=None,
+        aborted_after_seconds=None,
+        error=None,
+        wall_seconds=1.0,
+    )
+    with mlflow.start_run(run_name="parent") as parent:
+        child_id = log_guarded_run(run, run_name="child", tags={}, params={}, nested=True)
+    tags = MlflowClient(tracking_uri=store).get_run(child_id).data.tags
+    assert tags["mlflow.parentRunId"] == parent.info.run_id

@@ -158,6 +158,7 @@ def log_guarded_run(
     run_name: str,
     tags: Mapping[str, str],
     params: Mapping[str, Any],
+    nested: bool = False,
 ) -> str:
     """Log a guarded cross-validation as one MLflow run.
 
@@ -171,6 +172,7 @@ def log_guarded_run(
         run_name: Display name of the MLflow run.
         tags: Tags to set: configuration, splitter, model, data identity, git.
         params: Parameters to log, such as the model's hyperparameters.
+        nested: Log it as a child of the active run, as in a permutation test.
 
     Returns:
         The MLflow run ID.
@@ -184,7 +186,7 @@ def log_guarded_run(
         status["aborted_after_seconds"] = f"{run.aborted_after_seconds:.1f}"
     if run.error is not None:
         status["error"] = run.error[-4000:]
-    with mlflow.start_run(run_name=run_name) as active:
+    with mlflow.start_run(run_name=run_name, nested=nested) as active:
         mlflow.set_tags({**tags, **status})
         mlflow.log_params({name: str(value)[:500] for name, value in params.items()})
         for fold in run.folds:
@@ -241,7 +243,11 @@ def evaluate_and_log(
     *,
     shared_tags: Mapping[str, str],
     shuffle_training_labels: bool = False,
+    shuffle_seed: int = settings.RANDOM_STATE,
     fit_time_limit: float = FIT_TIME_LIMIT_SECONDS,
+    extra_tags: Mapping[str, str] | None = None,
+    run_suffix: str = "",
+    nested: bool = False,
 ) -> tuple[GuardedRun, str]:
     """Cross-validate one model on the reference period, guarded, and log it as a run.
 
@@ -250,7 +256,11 @@ def evaluate_and_log(
         splitter: Name of the splitter, a key of ``SPLITTERS``.
         shared_tags: Tags from ``base_tags``.
         shuffle_training_labels: Permute the training labels of every fold.
+        shuffle_seed: Seed of that permutation; logged as the tag ``permutation_seed``.
         fit_time_limit: Seconds a single fit may run before it is aborted.
+        extra_tags: More tags, such as the draw number of a repeated test.
+        run_suffix: Appended to the run name, to tell repeated draws apart.
+        nested: Log it as a child of the active run.
 
     Returns:
         The guarded run and its MLflow run ID.
@@ -260,6 +270,7 @@ def evaluate_and_log(
         SPLITTERS[splitter](),
         spec,
         shuffle_training_labels=shuffle_training_labels,
+        shuffle_seed=shuffle_seed,
         fit_time_limit=fit_time_limit,
     )
     params = {
@@ -267,13 +278,17 @@ def evaluate_and_log(
         "fit_time_limit_seconds": fit_time_limit,
         "cpu_count": os.cpu_count(),
     }
-    suffix = "__shuffled" if shuffle_training_labels else ""
+    tags = run_tags(
+        spec, splitter, shuffle_training_labels=shuffle_training_labels, shared=shared_tags
+    )
+    if shuffle_training_labels:
+        tags["permutation_seed"] = str(shuffle_seed)
+    shuffled = "__shuffled" if shuffle_training_labels else ""
     run_id = log_guarded_run(
         run,
-        run_name=f"{spec.name}__{splitter}{suffix}",
-        tags=run_tags(
-            spec, splitter, shuffle_training_labels=shuffle_training_labels, shared=shared_tags
-        ),
+        run_name=f"{spec.name}__{splitter}{shuffled}{run_suffix}",
+        tags={**tags, **(extra_tags or {})},
         params=params,
+        nested=nested,
     )
     return run, run_id

@@ -62,6 +62,9 @@ def _report_run(name: str, splitter: str, run: GuardedRun, run_id: str) -> None:
 
 def main() -> int:
     """Evaluate and log every requested model through every requested splitter."""
+    # Redirected, stdout on Windows is cp1252, and MLflow prints an emoji when a remote run
+    # ends: without this, end_run raises and the run stays RUNNING (ERR-012).
+    sys.stdout.reconfigure(encoding="utf-8")
     arguments = _arguments()
     target, failure = configure_with_local_fallback()
     if failure is not None:

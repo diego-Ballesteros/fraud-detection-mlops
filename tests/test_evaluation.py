@@ -25,10 +25,12 @@ from fraud_detection.models.evaluation import (
     ExpandingStepSplit,
     FoldEvent,
     OperatingPoint,
+    RankingHead,
     StepWindow,
     aggregate,
     cross_validate,
     precision_at_recall,
+    ranking_head,
     recall_at_precision,
     score_fold,
 )
@@ -449,3 +451,61 @@ def test_the_fold_table_shows_steps_rows_and_positives(frame: pd.DataFrame) -> N
     assert table["validation_positives"].tolist() == [4, 4, 4, 4, 4]
     assert table.loc[1, "train_positives"] == 20
     assert table.loc[1, "prevalence"] == pytest.approx(4 / table.loc[1, "validation_rows"])
+
+
+def test_derived_seeds_start_at_the_project_seed_and_are_distinct() -> None:
+    seeds = evaluation.derived_seeds(evaluation.PERMUTATIONS)
+    assert len(seeds) == 20
+    assert seeds[0] == settings.RANDOM_STATE
+    assert len(set(seeds)) == 20
+    assert evaluation.derived_seeds(3) == seeds[:3]
+
+
+def test_the_shuffle_seed_selects_the_permutation() -> None:
+    labels = np.r_[np.ones(30, dtype=int), np.zeros(270, dtype=int)]
+    default = evaluation.shuffled_labels(labels)
+    assert np.array_equal(default, evaluation.shuffled_labels(labels, settings.RANDOM_STATE))
+    other = evaluation.shuffled_labels(labels, settings.RANDOM_STATE + 1)
+    assert not np.array_equal(default, other)
+    assert np.bincount(other).tolist() == np.bincount(labels).tolist()
+
+
+def _fold_one_training_labels(frame: pd.DataFrame) -> np.ndarray:
+    features, labels = evaluation.features_and_labels(frame)
+    train, _ = next(ExpandingStepSplit().split(features))
+    return labels[train]
+
+
+@pytest.mark.usefixtures("spies")
+def test_cross_validate_passes_the_shuffle_seed_to_every_fold(frame: pd.DataFrame) -> None:
+    seeds = evaluation.derived_seeds(2)
+    given = []
+    for seed in seeds:
+        SpyClassifier.fitted_labels.clear()
+        cross_validate(
+            frame,
+            ExpandingStepSplit(),
+            FunctionTransformer,
+            SpyClassifier,
+            shuffle_training_labels=True,
+            shuffle_seed=seed,
+        )
+        given.append([labels.copy() for labels in SpyClassifier.fitted_labels])
+    # Another seed, another permutation in every fold; the seed given is the one applied.
+    for first, second in zip(*given, strict=True):
+        assert not np.array_equal(first, second)
+    expected = evaluation.shuffled_labels(_fold_one_training_labels(frame), seeds[0])
+    assert np.array_equal(given[0][0], expected)
+
+
+def test_the_head_of_a_ranking_counts_positives_and_marked_ones() -> None:
+    # Ranked: 0.9 (pos, marked) 0.8 (neg) 0.7 (pos) 0.7 (pos, marked) 0.1 (pos)
+    labels = _y(1, 0, 1, 1, 1)
+    scores = _s(0.9, 0.8, 0.7, 0.7, 0.1)
+    marked = np.asarray([True, False, False, True, False])
+    heads = ranking_head(labels, scores, marked, (1, 2, 3, 5))
+    assert heads[0] == RankingHead(k=1, flagged=1, positives=1, marked_positives=1)
+    assert heads[1] == RankingHead(k=2, flagged=2, positives=1, marked_positives=1)
+    # The 3rd score is tied with the 4th: both are in, never split.
+    assert heads[2] == RankingHead(k=3, flagged=4, positives=3, marked_positives=2)
+    assert heads[3] == RankingHead(k=5, flagged=5, positives=4, marked_positives=2)

@@ -71,3 +71,37 @@ agrega una nota de estado fechada.
 ---
 
 ## Entradas
+
+### EVAL-001 · Control del arnés: predictor constante de la clase mayoritaria · 2026-10-18
+
+| Campo | Valor |
+|---|---|
+| **Pregunta** | ¿El arnés calcula el PR-AUC como se declaró? Con todos los puntajes empatados, tiene que dar exactamente la prevalencia de cada fold de validación |
+| **Periodo evaluado** | Referencia. Temporal: valida 201–240, 241–280, 281–320, 321–360 y 361–400, y entrena con todos los steps anteriores. Estratificado: steps 1–400 |
+| **Tamaño de muestra** | Temporal: validaciones de 808.499, 602.140, 595.967, 797.269 y 600.973 filas, con 465, 456, 434, 408 y 460 positivos (prevalencia de 0,000512 a 0,000765). Estratificado: 1.157.406 filas por fold, con 895 o 896 positivos (0,000773–0,000774) |
+| **Método** | `majority_class` (`DummyClassifier(strategy="most_frequent")`) detrás del Pipeline `full`, por los dos splitters, cada uno en un proceso guardado |
+| **Métrica** | PR-AUC (precisión promedio). Es un control del instrumento, no una métrica del modelo |
+| **Resultado** | \|PR-AUC − prevalencia\| = 0,0 en los 10 folds, leído del servidor. Temporal: 0,000668 ± 0,000116. Estratificado: 0,000774 ± 0,0000005. ROC-AUC 0,5 y Brier igual a la prevalencia en todos los folds |
+| **Baseline** | El punto de `SignatureRule` sobre las mismas filas: recall 0,9788 ± 0,0101 (temporal) y 0,9794 ± 0,0055 (estratificado), con precisión 1,0 en los 10 folds |
+| **Número de particiones** | 5 temporales y 5 estratificadas |
+| **Dispersión** | Desviación estándar muestral (ddof = 1) entre los 5 folds de cada splitter |
+| **Run de MLflow** | `ec12c2c301de4468b2dd1584655c6f2a` (temporal) y `a8849c6081d24829b1118a9cb4865544` (estratificado), experimento `fraud-detection` en DagsHub |
+| **Reproducción** | `uv run python scripts/run_default_models.py --models majority_class` |
+| **Interpretación** | El arnés calcula el PR-AUC como se declaró, y el piso queda medido: la tasa base de cada fold. No dice nada sobre ningún modelo. La corrida `2c86f39c…` es un intento anterior del mismo control que quedó colgado por ERR-012, cerrado como FAILED |
+
+### EVAL-002 · Test de objetivo barajado: no colapsa · 2026-10-18
+
+| Campo | Valor |
+|---|---|
+| **Pregunta** | ¿Filtra la etiqueta a través de la estructura de folds o del preprocesamiento? |
+| **Periodo evaluado** | Referencia, splitter temporal: valida 201–400 en 5 ventanas de 40 steps |
+| **Tamaño de muestra** | Las validaciones de EVAL-001, con sus etiquetas verdaderas. Las etiquetas de entrenamiento se permutaron con `settings.RANDOM_STATE`, y conservan los conteos: 2.254, 2.719, 3.175, 3.609 y 4.017 positivos |
+| **Método** | Regresión logística, Random Forest y LightGBM con hiperparámetros por defecto, detrás del Pipeline `full`, por el mismo arnés que los modelos, con `shuffle_training_labels=True` |
+| **Métrica** | PR-AUC / prevalencia de cada fold. Criterio declarado antes de medir (ADR 0009): colapsa si es ≤ 10 en cada fold de cada familia |
+| **Resultado** | Regresión logística: 2,00 · 1,82 · 1,63 · 2,10 · 1,18 (1,75 ± 0,36). Random Forest: 1,06 · 1,09 · 1,07 · 1,01 · 1,00 (1,04 ± 0,03). LightGBM: 2,05 · **14,83** · 2,41 · 1,02 · 1,05 (4,27 ± 5,93). **No colapsa:** LightGBM falla en el fold 2, con PR-AUC 0,0112 |
+| **Baseline** | La prevalencia de cada fold, que es el piso (EVAL-001), y un ranking al azar sobre las mismas etiquetas: 1,015–1,028 veces la prevalencia en promedio, percentil 99 de 1,13 a 1,25 (ADR 0009, nota del Ejecutor) |
+| **Número de particiones** | 5 folds temporales × 3 familias |
+| **Dispersión** | Por fold, arriba; entre paréntesis, media ± desviación estándar muestral (ddof = 1) |
+| **Run de MLflow** | `62b675e957464670b916885e03fdfbad` (regresión logística), `4217ce9edf5446919f41fa0d1c0848a9` (Random Forest), `fd9bcbe7d54442d8b1257d1eb1a4f711` (LightGBM) |
+| **Reproducción** | `uv run python scripts/run_leakage_check.py` (sale con código 1) |
+| **Interpretación** | Es un bloqueante: la evaluación de los modelos no se corrió. En el fold que falla, el recall con precisión ≥ 0,95 es 0, el recall a la precisión de la regla es 0, y el ROC-AUC es 0,26: unos pocos fraudes quedan arriba del ranking y el resto por debajo de las filas legítimas. **No permite concluir** si es azar o fuga. El diagnóstico declarado tampoco lo separa: en ese fold cayeron 4 positivos barajados en filas con la firma, frente a 2,27 esperados, y el fold 1 tuvo 5 frente a 2,09 con un cociente de 2,05 |

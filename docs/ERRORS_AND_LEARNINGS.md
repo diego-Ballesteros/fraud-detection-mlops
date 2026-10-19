@@ -319,12 +319,47 @@ correlativo.
 - **Cómo se detectó:** el procedimiento de `docs/DEPENDENCIES.md` para verificar un piso,
   corrido porque ese documento se actualiza en el mismo turno que el `uv add`, y corrido con
   la suite completa y no solo con los imports de las dependencias nuevas.
-- **Corrección:** por la política del ADR 0003, los pisos subieron a lo medido:
-  `scikit-learn>=1.4.2` (1.4.2 es la primera que importa en esa resolución) y
-  `mlflow>=3.9,<4` (3.8.1 falla, 3.9.0 pasa). Las dos subidas las decidió el Verificador en
-  el turno. El lock no se movió. En los pisos nuevos, la suite completa pasa (142 tests).
+- **Corrección:** los pisos subieron a lo medido: `scikit-learn>=1.4.2` (1.4.2 es la
+  primera que importa en esa resolución) y `mlflow>=3.9,<4` (3.8.1 falla, 3.9.0 pasa). Las
+  dos subidas no fueron una decisión del turno: las dicta la política del ADR 0003, según la
+  cual un piso que admite una configuración que falla sube; la medición mostró que los dos la
+  admitían, y el Ejecutor midió hasta dónde y lo aplicó. El lock no se movió. En los pisos
+  nuevos, la suite completa pasa (142 tests).
 - **Defensa:** nivel 3 de `docs/METHODOLOGY.md`, sección 6.5: está escrita en el
   procedimiento de `docs/DEPENDENCIES.md`. Ningún job de CI corre la suite en los pisos.
 - **Aprendizaje:** un `uv add` verifica los pisos de todas las dependencias, no solo los de
   las que entran. El piso de scikit-learn se rompió sin que nadie tocara su línea.
 - **Referencias:** ADR 0003, ADR 0005, `docs/DEPENDENCIES.md`.
+
+### ERR-012 · Una emoji de MLflow dejó una corrida remota en RUNNING · 2026-10-18
+
+- **Síntoma:** la primera corrida contra DagsHub registró sus 49 métricas y sus etiquetas, y
+  el script murió al cerrarla: `UnicodeEncodeError: 'charmap' codec can't encode character
+  '\U0001f3c3'`, desde `mlflow.end_run`. La corrida quedó en estado RUNNING en el servidor.
+- **Mecanismo:** con un servidor remoto, `set_terminated` de MLflow escribe en `sys.stdout`
+  una línea que empieza con una emoji ("🏃 View run … at: …"). Con la salida redirigida a una
+  tubería (`| tee`), Python en Windows codifica stdout con la codificación local, cp1252, que
+  no tiene esa emoji. En `set_terminated` (mlflow 3.17.1) la línea se escribe **antes** de
+  `update_run_info`, así que la excepción corta el cierre y el estado nunca llega al servidor.
+  Con el store sqlite local no
+  ocurre, porque esa línea solo se imprime para servidores remotos: por eso ningún test ni el
+  ensayo previo con datos reales lo vieron.
+- **Cómo se detectó:** la primera corrida real contra DagsHub. Es `docs/METHODOLOGY.md`,
+  sección 6.4: una superficie nueva no se cierra sin un uso real.
+- **Corrección:** los dos scripts de la fase 2 reconfiguran stdout a UTF-8 al arrancar.
+  Control: un proceso con stdout redirigido que escribe la emoji sale con código 1 sin la
+  reconfiguración y con código 0 con ella. La corrida colgada (`2c86f39c…`) no se borró: se
+  cerró como FAILED, con la etiqueta `superseded` y su razón, y se repitió.
+- **Defensa:** nivel 1 para los dos scripts, porque la reconfiguración está en su código.
+  Nivel 3 para cualquier otro proceso que registre en un servidor remoto con stdout
+  redirigido. Es la misma familia que ERR-010: en Windows, la codificación por defecto de
+  Python no es UTF-8.
+- **Aprendizaje:** un store local no ejercita los caminos del store remoto. El primer uso
+  contra el servidor real es parte de la verificación, no un trámite.
+- **Referencias:** ERR-010, `scripts/run_default_models.py`, `scripts/run_leakage_check.py`.
+- **Nota de estado (2026-10-18):** es la tercera vez que la codificación por defecto de
+  Python en Windows cuesta una entrada (ERR-009, instancia relacionada; ERR-010; ERR-012). A
+  partir de aquí, **la defensa estándar del proyecto es que todo script reconfigure stdout a
+  UTF-8 al arrancar**, no que alguien lo recuerde cada vez. Hoy la cumplen los dos scripts de
+  la fase 2. `scripts/prepare_data.py` todavía no: queda pendiente, igual que subir la regla
+  al nivel 2 con un test que la verifique en cada script de `scripts/`.

@@ -151,11 +151,14 @@ pendiente de decisión y no se corrigió.**
 
 ---
 
-**Nota de estado (2026-10-18, fase 2):** para lightgbm, la condición quedó decidida. El
-Verificador eligió importar lightgbm dentro de su fábrica, en
-`src/fraud_detection/models/estimators.py`, en vez de instalar el VC++ Redistributable en la
-máquina, y un test construye el modelo en un intérprete limpio. Medido al decidirlo: el
-`lib_lightgbm.dll` de lightgbm 4.7.0 declara `MSVCP140.dll` y `VCOMP140.DLL` en su tabla de
-importaciones, scikit-learn trae las dos con esos nombres exactos, y lightgbm 4.0.0, el piso,
-importa solo. Para numba sigue pendiente: todavía no está en el grafo. Los pisos de mlflow y
-de scikit-learn cambiaron en la misma fase; la tabla viva es `docs/DEPENDENCIES.md`.
+**Nota de estado (2026-10-18, fase 2):** para lightgbm, la condición quedó decidida, y la
+decisión es del Ejecutor, no del Arquitecto: lightgbm se importa dentro de su fábrica, en
+`src/fraud_detection/models/estimators.py`, y un test construye el modelo en un intérprete
+limpio. La razón, medida al decidirlo: el `lib_lightgbm.dll` de lightgbm 4.7.0 declara
+`MSVCP140.dll` y `VCOMP140.DLL` en su tabla de importaciones, scikit-learn trae las dos con
+esos nombres exactos, y el módulo de las fábricas importa scikit-learn arriba, así que al
+llamar a la fábrica las dos ya están cargadas. La alternativa descartada, instalar el VC++
+Redistributable, arregla esta máquina y no a un tercero que corra el proyecto en Windows sin
+él. lightgbm 4.0.0, el piso, importa solo. El Arquitecto la revisó y la aceptó. Para numba
+sigue pendiente: todavía no está en el grafo. Los pisos de mlflow y de scikit-learn cambiaron
+en la misma fase, por la política de este ADR; la tabla viva es `docs/DEPENDENCIES.md`.
