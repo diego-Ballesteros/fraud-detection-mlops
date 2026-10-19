@@ -1,0 +1,91 @@
+[project]
+name = "fraud-detection-mlops"
+version = "0.1.0"
+description = "Fraud detection on PaySim mobile transactions with hyperparameter optimization, interpretability and drift monitoring."
+readme = "README.md"
+requires-python = ">=3.11,<3.12"
+# Floors are the minimum the project needs, not the latest release on the day `uv add` ran,
+# and sit on a major version where the API matters (docs/adr/0003-dependency-bounds.md).
+dependencies = [
+    "lightgbm>=4.0",
+    "matplotlib>=3.7",
+    "mlflow>=3.9,<4",
+    "pandas>=2.2,<3",
+    "pyarrow>=16",
+    "pydantic>=2.3",
+    "pydantic-settings>=2.2",
+    "scikit-learn>=1.4.2",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/fraud_detection"]
+
+# --- uv ----------------------------------------------------------------------
+[tool.uv]
+# numba is not a direct dependency. Without this floor, a universal resolution backtracks
+# to numba 0.53.1, which has no cp311 wheel (docs/adr/0003-dependency-bounds.md).
+constraint-dependencies = ["numba>=0.57"]
+
+# --- Ruff --------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+# Markdown is out of ruff's scope: the pre-commit hook only passes Python files, so
+# formatting .md code blocks in CI alone would let a doc pass locally and fail in CI.
+extend-exclude = ["*.md"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "N",   # pep8-naming
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "D",   # pydocstyle
+    "PTH", # flake8-use-pathlib
+    "SIM", # flake8-simplify
+    "C4",  # flake8-comprehensions
+    "PT",  # flake8-pytest-style
+    "NPY", # numpy-specific rules (NPY002 bans the unseeded legacy global RNG)
+    "RUF", # ruff-specific rules
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["D"]
+
+# --- Mypy --------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.11"
+disallow_untyped_defs = true
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_return_any = true
+plugins = ["pydantic.mypy"]
+
+# --- Pytest ------------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["-ra", "--strict-markers", "--cov=fraud_detection", "--cov-report=term-missing"]
+
+[dependency-groups]
+dev = [
+    "ipykernel>=7.0",
+    "mypy>=2.0",
+    "nbclient>=0.11",
+    "nbformat>=5.0",
+    "pre-commit>=4.0",
+    "pytest>=9.0",
+    "pytest-cov>=7.0",
+    "ruff>=0.17",
+]

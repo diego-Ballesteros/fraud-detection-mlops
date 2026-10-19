@@ -1,0 +1,64 @@
+# --- Virtual environments ---------------------------------------------------
+.venv/
+venv/
+env/
+.env/
+
+# --- Python caches and build artifacts ---------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# --- Secrets: only the template is versioned ---------------------------------
+.env
+.env.*
+!.env.example
+
+# --- MLflow local tracking ---------------------------------------------------
+mlruns/
+mlartifacts/
+mlflow.db
+
+# --- Data: nothing under data/ is versioned except the .gitkeep placeholders ---
+# Directories are re-included so git can descend into them and find the .gitkeep
+# files; every file inside stays ignored, including any new subfolder.
+/data/**
+!/data/**/
+!/data/**/.gitkeep
+
+# --- Reports: generated artifacts, only the placeholder is versioned ---------
+/reports/**
+!/reports/**/
+!/reports/**/.gitkeep
+# Except deliverables: the phase 4 HTML report is graded and must be versioned.
+!/reports/deliverables/**
+
+# --- Jupyter -----------------------------------------------------------------
+.ipynb_checkpoints/
+
+# --- IDEs and editors --------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# --- Windows -----------------------------------------------------------------
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# --- macOS -------------------------------------------------------------------
+.DS_Store
+.AppleDouble
+.LSOverride
+._*

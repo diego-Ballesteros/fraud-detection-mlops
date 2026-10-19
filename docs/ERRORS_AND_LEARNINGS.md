@@ -1,0 +1,465 @@
+# Errores y aprendizajes
+
+> Contrato: el registro guarda mecanismos que habrían costado un turno, hayan fallado o no,
+> y documenta el **mecanismo** —por qué ocurrió— y no solo el síntoma. Un registro que solo
+> admite errores que alcanzaron a fallar selecciona contra las buenas atrapadas.
+
+---
+
+## Formato de entrada
+
+Cada entrada se agrega al final de la sección **Entradas**, con un identificador
+correlativo.
+
+```markdown
+### ERR-NNN · <título corto> · AAAA-MM-DD
+
+- **Síntoma:** qué se observó, con la salida real si la hay.
+- **Mecanismo:** por qué ocurrió. La causa, no la descripción del síntoma.
+- **Cómo se detectó:** qué comando, test o revisión lo hizo visible.
+- **Corrección:** qué se cambió.
+- **Defensa:** qué impide que vuelva a ocurrir, y en qué nivel de la jerarquía de
+  `docs/METHODOLOGY.md`, sección 6.5: la herramienta lo impide, un test lo detecta, o
+  está escrito en un documento.
+- **Aprendizaje:** qué haríamos distinto la próxima vez.
+- **Referencias:** commit, PR o ADR relacionados.
+```
+
+---
+
+## Entradas
+
+### ERR-001 · El CSV del dataset quedó commiteado · 2026-10-18
+
+- **Síntoma:** la verificación de que git no ve el archivo de datos salió en rojo.
+  `git check-ignore -v data/raw/PS_20174392719_1491204439457_log.csv` terminó con código 1
+  sin imprimir nada, y `git ls-files data/` listó el CSV.
+- **Mecanismo:** las reglas de `.gitignore` no se aplican a archivos que git ya rastrea, y
+  `git check-ignore` no informa sobre ellos aunque una regla coincida. El CSV entró en el
+  commit local `366df40` cuando el repositorio todavía no tenía `.gitignore`; escribir la
+  regla después no lo saca del índice. Por eso una regla correcta y un archivo rastreado
+  producen la misma salida roja que una regla mal escrita.
+- **Evidencia medida:**
+  - `366df40` agregó el CSV como 6.362.621 líneas; en ese commit no existía `.gitignore`.
+  - `main` y `develop` locales estaban un commit por delante de `origin`, que seguía en el
+    commit inicial: ninguna rama remota contenía el CSV.
+  - El blob en el commit pesaba 493.534.783 bytes.
+- **Cómo se detectó:** `git ls-files` al inicio del turno de andamiaje, antes de escribir
+  ningún archivo.
+- **Cómo se separaron las dos causas posibles:** `git check-ignore -v --no-index` evalúa
+  las reglas sin mirar el índice. Con controles positivos y negativos, el CSV coincidió
+  con `/data/**`, los `.gitkeep` y `.env.example` aparecieron re-incluidos por sus reglas
+  de negación, y `config.py` y `uv.lock` no coincidieron con ninguna. La regla era
+  correcta; la causa era el rastreo.
+- **Corrección:** `366df40` fue reemplazado por `0387288`, que no contiene el CSV. Estado
+  medido después: ninguna ref alcanza el blob (`git rev-list --all --objects` no lo
+  lista) y `main` coincide con `origin/main`.
+- **Defensa:** `.gitignore` excluye todo `data/` salvo los `.gitkeep`, y git no agrega
+  archivos ignorados (nivel 1: la herramienta lo impide). El hook `check-added-large-files`
+  detiene un archivo de más de 1024 KB añadido fuera de `data/` (nivel 1, mientras los
+  hooks estén instalados).
+- **Aprendizaje:** el `.gitignore` se escribe antes de que cualquier dato entre al árbol
+  de trabajo. Una salida roja de `check-ignore` necesita su control con `--no-index` antes
+  de tocar la regla: sin él, "regla mal escrita" y "archivo ya rastreado" se leen igual.
+- **Referencias:** `366df40` (ya no alcanzable desde ninguna rama), `0387288`.
+
+### ERR-002 · Un dato derivado presentado como medido sostuvo un requisito · 2026-10-18
+
+- **Síntoma:** dos afirmaciones sobre el estado del repositorio se reportaron como hechos
+  medidos sin serlo, y una de ellas llegó a un prompt como criterio de aceptación.
+  - **Instancia 1, del Ejecutor:** el reporte afirmó que `ruff format` revisaba "4 `.py` +
+    `pyproject.toml` + 6 `.md`". En realidad eran 4 `.py` y 7 `.md`; `ruff format` nunca
+    revisa `pyproject.toml`. El dato equivocado entró en el prompt siguiente como criterio
+    de aceptación: "debe reportar solo archivos Python y pyproject.toml".
+  - **Instancia 2, del Arquitecto:** el prompt siguiente dijo que la medición del Ejecutor
+    "confirmó" que la copia en disco del CSV tiene finales CRLF. No lo confirmó: la
+    diferencia de exactamente un byte por línea entre la copia en disco y el blob es
+    evidencia fuerte pero indirecta, y el archivo nunca se abrió.
+- **Mecanismo:** un dato derivado se presentó como medido y después sostuvo un requisito.
+  En la instancia 1, la lista de archivos de `ruff format` se dedujo de
+  `ruff check --show-files`, que incluye `pyproject.toml` por las reglas RUF, en vez de
+  contar la salida del propio `format`. En la instancia 2, una inferencia que el reporte
+  marcaba como tal se citó como medición.
+- **Cómo se detectó:** la instancia 1, al contar las líneas `format_path` de
+  `ruff format --check --verbose`. La instancia 2, al contrastar el prompt con el reporte
+  original, que decía "inferencia, no medido".
+- **Corrección:** las dos se corrigieron como premisas en el turno siguiente, y el
+  Arquitecto las aceptó.
+- **Defensa:** nivel 3 de la jerarquía de `docs/METHODOLOGY.md`, sección 6.5: está escrito
+  en este registro. Ninguna herramienta ni test lo detecta.
+- **Aprendizaje:** un dato que se derivó de otra salida se reporta como derivado,
+  nombrando de dónde salió. Y el Arquitecto no asciende una inferencia del Ejecutor a
+  medición al citarla.
+- **Referencias:** ERR-001, por la medición de tamaños del CSV que originó la inferencia
+  de la instancia 2.
+- **Nota de estado (2026-10-18):** la instancia 2 quedó medida en la fase 1 con
+  `scripts/prepare_data.py`. El CSV en disco tiene 6.362.621 bytes `\n`, los 6.362.621
+  precedidos por `\r`, y ningún `\r` suelto. La inferencia era correcta, y sigue siendo
+  cierto que no estaba medida cuando se citó.
+
+### ERR-003 · La resolución elige en silencio un paquete sin rueda para nuestra plataforma · 2026-10-18
+
+- **Síntoma:** ninguno visible, y eso es lo que importa. La resolución universal de la pila
+  completa salió en verde y eligió numba 0.53.1 y llvmlite 0.36.0 para todo Python <3.12.
+  Ninguna de las dos tiene rueda cp311-win_amd64.
+- **Mecanismo:** tres piezas, y ninguna avisa.
+  - uv ignora las cotas superiores de `requires_python` de las dependencias. Por eso numba
+    0.53.1, que declara `>=3.6,<3.10`, es elegible en 3.11.
+  - El pin `pandas<3` inclina la resolución universal hacia esa versión. El síntoma está
+    medido (V0 contra V1); el porqué no.
+  - Todo sale en verde: ninguna herramienta compara lo resuelto con las ruedas que existen
+    para la plataforma.
+- **Cómo se detectó:** **no falló**. La resolución en seco que cerraba otro hallazgo (las
+  cotas de pyarrow y mlflow) mostró líneas de numba distintas de las de la primera
+  resolución. El verificador de ruedas, que se había construido para medir el pin de Python,
+  confirmó que esas versiones no tienen rueda. Ninguna de las dos mediciones buscaba esto.
+- **Corrección:** `[tool.uv] constraint-dependencies = ["numba>=0.57"]`. Con la constraint,
+  la resolución elige numba 0.68.0 y llvmlite 0.50.0; sin ella (control), 0.53.1 y 0.36.0.
+- **Defensa:** para numba, nivel 1 de `docs/METHODOLOGY.md`, sección 6.5: la constraint lo
+  impide. Para la clase general, cualquier transitiva sin rueda, nivel 3: ningún test compara
+  el lock con las ruedas disponibles.
+- **Aprendizaje:** una resolución en verde no prueba que lo resuelto se pueda instalar en
+  nuestra plataforma. Eso se mide aparte.
+- **Referencias:** ADR 0003, ADR 0004, ADR 0005.
+
+### ERR-004 · Un prompt del Arquitecto llegó truncado a mitad de frase · 2026-10-18
+
+- **Síntoma:** el prompt terminaba en "…así que fijar el intérprete crea pisos", sin cerrar
+  la frase y sin las secciones que cierran un prompt.
+- **Mecanismo:** una instrucción incompleta se lee igual que una completa, salvo en el punto
+  exacto del corte.
+- **Defensa que funcionó:** no completar la frase e informar el corte antes de cualquier
+  otra cosa. Es la regla de autoría de los ADR (`docs/METHODOLOGY.md`, sección 3) aplicada
+  a la instrucción misma.
+- **Corrección:** el Arquitecto envió la continuación, con el texto exacto de la frase.
+- **Referencias:** ADR 0003, por la frase que llegó cortada.
+
+### ERR-005 · pandas tipa en silencio: enteros que desbordan y categorías que se vuelven nulos · 2026-10-18
+
+- **Síntoma:** ninguno visible, y por eso cuenta. Medido con pandas 2.3.3 antes de escribir
+  el loader: `pd.read_csv(..., dtype={"a": "int8"})` leyó `300` como `44`, y
+  `dtype={"c": "int16"}` leyó `40000` como `-25536`, sin error ni advertencia, con el motor
+  C y con el motor pyarrow. Con `dtype=CategoricalDtype(categories=[...])`, un valor fuera
+  de las categorías quedó como `NaN`, también sin aviso.
+- **Mecanismo:** el valor resultante es el original módulo 2^n (300 − 256 = 44;
+  40000 − 65536 = −25536): una truncación en complemento a dos, sin verificación de rango.
+  En qué punto de pandas ocurre no quedó determinado. En la categórica, todo valor ajeno a
+  las categorías fijadas se convierte en nulo: es una imputación silenciosa
+  (`docs/METHODOLOGY.md`, sección 7.1).
+- **Cómo se detectó:** un sondeo previo al código, que buscaba específicamente las
+  conversiones capaces de corromper un dato sin fallar.
+- **Corrección:** el CSV se parsea con `pyarrow.csv` y un tipo explícito por columna, que
+  rechaza `300` en `int8` con un `ArrowInvalid` que nombra la columna. `type` se lee con
+  categorías abiertas, y las declaradas se aplican después de validar el dominio, con una
+  guarda que se niega a crear nulos.
+- **Defensa:** nivel 2 de `docs/METHODOLOGY.md`, sección 6.5: dos tests de
+  `tests/test_loader.py`, uno para el entero fuera de rango y otro para el tipo fuera de
+  dominio.
+- **Aprendizaje:** un dtype explícito no es un dtype verificado. Un entero angosto afirma un
+  rango, y alguien tiene que comprobarlo.
+- **Referencias:** `src/fraud_detection/data/loader.py`, en el docstring del módulo.
+
+### ERR-006 · `astype` a una categórica no ordenada no reordena, y el síntoma se atribuyó al parquet · 2026-10-18
+
+- **Síntoma:** el test de dtypes del parquet falló: las categorías de `type` volvían en
+  orden de aparición (`PAYMENT`, `TRANSFER`, …) y no en el declarado (`CASH_IN`,
+  `CASH_OUT`, …). La comparación de dtypes con `==` había pasado.
+- **Mecanismo:** para pandas, dos categóricas no ordenadas con las mismas categorías son
+  iguales aunque el orden difiera, y `Series.astype(dtype)` no hace nada cuando el dtype
+  destino es igual al actual. Medido con pandas 2.3.3: `astype` deja
+  `['TRANSFER', 'PAYMENT', 'CASH_IN']` intacto, y `cat.set_categories` lo lleva a
+  `['CASH_IN', 'PAYMENT', 'TRANSFER']` conservando los valores.
+- **Error de diagnóstico previo:** en el sondeo inicial, el mismo síntoma se atribuyó a la
+  ida y vuelta por parquet, y así se informó durante el turno. Era falso: el sondeo hacía
+  un `astype` antes de escribir, y ese `astype` nunca había reordenado. Un segundo sondeo,
+  que construía la categórica desde cero, mostró que el parquet sí conserva el orden; la
+  contradicción entre los dos no se investigó en el momento.
+- **Cómo se detectó:** el test, que compara el orden de las categorías por separado
+  precisamente porque `==` no lo compara.
+- **Corrección:** `apply_declared_dtypes` recodifica con `cat.set_categories`.
+- **Defensa:** nivel 2: la aserción de orden en el test de dtypes de `tests/test_loader.py`.
+- **Aprendizaje:** dos sondeos que se contradicen son un hallazgo, no ruido. Y la igualdad
+  de dos dtypes no prueba que sean el mismo dtype.
+- **Referencias:** ERR-005, por la guarda contra nulos que comparte la misma función.
+
+### ERR-007 · Una dependencia opcional de pandas falla solo al llamarse · 2026-10-18
+
+- **Síntoma:** `scripts/prepare_data.py` completó trece mediciones y falló en la catorce con
+  `ModuleNotFoundError: No module named 'scipy'`, desde
+  `DataFrame.corrwith(..., method="spearman")`.
+- **Mecanismo:** pandas importa scipy dentro del método, en el momento de la llamada, no al
+  importar pandas. scipy no es dependencia del proyecto. ruff y mypy no pueden verlo, y
+  ningún test ejecuta las funciones de medición.
+- **Cómo se detectó:** la corrida completa del script.
+- **Corrección:** Spearman se calcula por su definición, como Pearson sobre rangos
+  promedio, sin scipy. Se verificó contra un caso con empates calculado a mano (3/√18).
+- **Defensa:** ninguna automática: nivel 3. Las funciones de medición no tienen tests en
+  esta fase, y es la defensa que falta (`docs/METHODOLOGY.md`, sección 7.6). Además, cuando
+  entre scikit-learn en la fase 2, scipy llegará como dependencia transitiva y el síntoma
+  desaparecerá sin que nadie lo haya decidido.
+- **Aprendizaje:** que pandas importe no garantiza que todos sus métodos corran.
+- **Referencias:** `src/fraud_detection/data/profiling.py`, en el docstring de la función
+  de correlación.
+- **Nota de estado (2026-10-18):** la defensa subió a nivel 2 en la misma fase.
+  `tests/test_profiling.py` tiene un test por función de medición. El de correlación
+  verifica Spearman con empates contra un valor calculado a mano, que se distingue del de
+  Pearson, así que volver a `method="spearman"` falla en CI mientras scipy no esté en el
+  grafo.
+- **Nota de estado (2026-10-18), segunda:** scipy entró al grafo en la fase 1, no en la 2:
+  llegó con scikit-learn (scipy 1.17.1 en el lock). Desde entonces, volver a
+  `method="spearman"` ya no falla: calcula el mismo valor y el test pasa. El test sigue
+  protegiendo la cifra, pero ya no detecta la dependencia oculta, y la nota anterior dejó
+  de ser cierta en esa parte.
+
+### ERR-008 · Una lista de inclusión vacía significa "todas las columnas" · 2026-10-18
+
+- **Síntoma:** ninguno visible. Medido antes de corregir: `read_raw_csv` con una lista
+  vacía de columnas, sobre un CSV con encabezado `foo,bar`, devolvió las dos columnas, con
+  dtypes inferidos `int64` y `string`.
+- **Mecanismo:** en `pyarrow.csv.ConvertOptions`, un `include_columns` vacío significa
+  "todas las columnas", no "ninguna". El validador lee las columnas declaradas que aparecen
+  en el encabezado. Si no aparece ninguna, la lista vacía invierte el significado, y el
+  lector infiere tipos sobre columnas que nadie declaró: lo que el loader dice no hacer
+  nunca.
+- **Cómo se detectó:** al escribir los tests del validador, revisando el camino en que no
+  hay nada que leer. Se confirmó con la medición antes de corregir.
+- **Corrección:** el validador no lee nada cuando ninguna columna declarada está presente,
+  y los chequeos que dependen de la lectura salen omitidos.
+- **Defensa:** nivel 2: el test del validador que exige que un chequeo que no puede
+  ejecutarse salga omitido cubre un archivo sin columnas declaradas. `loader.read_raw_csv`
+  conserva el comportamiento con una lista vacía; quedó fuera del alcance del turno y se
+  reportó.
+- **Aprendizaje:** el caso vacío de un parámetro se prueba; "vacío" no siempre quiere
+  decir "nada".
+- **Referencias:** `src/fraud_detection/data/validator.py`, en la lectura con dtypes
+  declarados.
+- **Nota de estado (2026-10-18):** corregido también del lado del loader, en la misma
+  fase. `loader.read_raw_csv` levanta `ValueError` ante una lista vacía, con test en
+  `tests/test_loader.py`. Una lista vacía que significa "todas" reabría ERR-005 por el
+  costado: columnas no declaradas con tipos inferidos.
+- **Nota de estado (2026-10-18), segunda instancia:** `pre-commit run --files` con una lista
+  vacía cae a su modo por defecto: guarda los cambios no preparados en un stash y los
+  restaura. Ocurrió al pasarle `$(git ls-files --others)` cuando todos los archivos ya
+  estaban preparados. Es el mismo mecanismo que `include_columns=[]`: una colección vacía
+  significa "nada" para quien llama y "todo", o "el default", para la herramienta. La
+  defensa es pasar la lista explícita y verificar que no esté vacía antes de invocar.
+
+### ERR-009 · Un arnés de mutación leyó "no corrió ningún test" como "el mutante sobrevivió" · 2026-10-18
+
+- **Síntoma:** el arnés de mutación del Ejecutor (ad hoc, no versionado) reportó 0 de 12
+  mutantes detectados sobre el código de features, baseline y loader. Todos "sobrevivían".
+- **Mecanismo:** dos piezas, y ninguna avisa.
+  - La plantilla del plugin de pytest era una cadena no cruda con `"\r\n"` adentro. Al
+    formatearse, el plugin generado quedó con un salto de línea real dentro de una cadena:
+    un `SyntaxError`. pytest falló al cargar el plugin y no ejecutó ningún test.
+  - El arnés decidía "detectado" buscando líneas `FAILED` en la salida. Sin tests
+    ejecutados no hay líneas `FAILED`, y la ausencia se leyó como supervivencia.
+- **Instancia relacionada, del mismo turno:** al generar un archivo desde un comando de
+  shell, un `\\n` llegó como `\n` y rompió `scripts/prepare_data.py` con saltos de línea
+  dentro de cadenas. Ruff lo detectó antes de cualquier corrida.
+- **Cómo se detectó:** 0 de 12 era inverosímil frente a una suite que en el turno anterior
+  detectó 17 de 17. Se leyó la plantilla en bytes antes de tocar ningún test.
+- **Corrección:** el arnés se reescribió con plantilla cruda. Ahora corre primero un
+  control sin mutación, que tiene que ejecutar los tests y pasarlos, y trata como "error
+  del arnés" toda corrida en la que pytest no ejecutó tests. Con eso: 12 de 12 detectados.
+- **Defensa:** nivel 3: está escrito aquí. El arnés no está versionado.
+- **Aprendizaje:** un instrumento que puede fallar sin producir la señal que busca convierte
+  su propio fallo en un resultado. Es `docs/METHODOLOGY.md`, sección 7.6, otra vez: la
+  ausencia de evidencia de fallo se lee igual que la evidencia de éxito, salvo que haya un
+  control que pruebe que el instrumento corrió.
+- **Referencias:** ERR-007, por la otra vez que un fallo se manifestó solo al ejecutar.
+
+### ERR-010 · El ejecutor de notebooks corrompió los acentos y todas las verificaciones dieron verde · 2026-10-18
+
+- **Síntoma:** `uv run jupyter execute --inplace notebooks/*.ipynb` salió con código 0, con
+  contadores consecutivos, cero errores, cero salidas a stderr y cero rutas absolutas. Pero
+  las figuras decían "LegÃtima" y "AutocorrelaciÃ³n": el archivo guardado tenía 214 marcas
+  de mojibake y ninguna palabra acentuada correcta.
+- **Mecanismo:** `nbclient/cli.py` (0.11.0) abre el notebook con `input_path.open()`, sin
+  `encoding`. Sin el modo UTF-8, Python en Windows usa la codificación local, que en esta
+  máquina es cp1252. Los bytes UTF-8 se decodifican como cp1252, el kernel ejecuta las
+  cadenas corruptas, y `nbformat.write` guarda la corrupción en UTF-8. Ninguna celda falla:
+  una cadena mal decodificada sigue siendo una cadena válida.
+- **Cómo se detectó:** mirando las figuras; ninguna verificación automática lo vio. Los
+  controles del ejecutor (un notebook que debe pasar y otro que debe fallar) eran solo ASCII.
+- **Corrección:** la tarea `notebooks` del Taskfile fija `PYTHONUTF8=1`. Un tercer control,
+  un notebook que afirma el valor de una cadena acentuada, falla sin el modo UTF-8
+  (`AssertionError: 'Leg\xc3\xadtima'`) y pasa con él, y el archivo guardado conserva el
+  carácter.
+- **Defensa:** nivel 1 para la tarea, porque su entorno fija la variable. Nivel 3 para quien
+  ejecute `jupyter execute` a mano sin ella: está escrito aquí y en el Taskfile, y ningún
+  test lo detecta.
+- **Aprendizaje:** los controles de un arnés tienen que cubrir la clase de dato que el arnés
+  procesa; un control solo ASCII no prueba nada sobre un texto en español. Es un sexto caso
+  del verde en falso de `docs/METHODOLOGY.md`, sección 7.6.
+- **Referencias:** `Taskfile.yml`, tarea `notebooks`; `docs/DEPENDENCIES.md`, fila de
+  `nbclient`; ERR-009.
+
+### ERR-011 · Una dependencia nueva invalidó el piso de otra sin tocar su declaración · 2026-10-18
+
+- **Síntoma:** ninguno en el lock, que resolvió en verde (scikit-learn 1.9.1, mlflow
+  3.17.1). Solo la verificación en los pisos lo mostró: con mlflow y lightgbm agregados,
+  scikit-learn 1.2.0, su piso de entonces, falló al importar
+  (`ValueError: numpy.dtype size changed, may indicate binary incompatibility`). Al subir ese
+  piso apareció un segundo caso: mlflow 3.0.0, su piso de entonces, falló al abrir el store
+  sqlite (`ImportError: cannot import name 'FallbackAsyncAdaptedQueuePool' from
+  'sqlalchemy.pool'`). `DEPENDENCIES.md` seguía afirmando que la suite pasaba en los pisos.
+- **Mecanismo:** dos piezas, y ninguna avisa.
+  - `--resolution lowest-direct` baja solo las dependencias directas; las transitivas, como
+    numpy y SQLAlchemy, toman la versión más alta compatible. Agregar mlflow o lightgbm,
+    cualquiera de las dos sola, llevó numpy de 1.26.4 a 2.4.6 en la resolución en los pisos,
+    aunque ninguna declara `numpy>=2` (mlflow 3.0.0 declara `numpy<3`; lightgbm 4.0.0,
+    `numpy` sin cota). El resolvedor sube pandas de 2.2.0 a 2.2.2 en vez de bajar numpy; por
+    qué elige ese camino no está determinado.
+  - Las dos versiones afectadas declaran una compatibilidad que no tienen: scikit-learn 1.2.0
+    y 1.3.0 piden `numpy>=1.17.3` sin techo y no son binariamente compatibles con numpy 2, y
+    mlflow 3.0.0 a 3.8.1 piden `sqlalchemy<3` e importan un símbolo que SQLAlchemy 2.1 ya no
+    tiene. Es el mismo hecho que registra el ADR 0005: compatibilidad declarada no es
+    compatibilidad en ejecución.
+- **Cómo se detectó:** el procedimiento de `docs/DEPENDENCIES.md` para verificar un piso,
+  corrido porque ese documento se actualiza en el mismo turno que el `uv add`, y corrido con
+  la suite completa y no solo con los imports de las dependencias nuevas.
+- **Corrección:** los pisos subieron a lo medido: `scikit-learn>=1.4.2` (1.4.2 es la
+  primera que importa en esa resolución) y `mlflow>=3.9,<4` (3.8.1 falla, 3.9.0 pasa). Las
+  dos subidas no fueron una decisión del turno: las dicta la política del ADR 0003, según la
+  cual un piso que admite una configuración que falla sube; la medición mostró que los dos la
+  admitían, y el Ejecutor midió hasta dónde y lo aplicó. El lock no se movió. En los pisos
+  nuevos, la suite completa pasa (142 tests).
+- **Defensa:** nivel 3 de `docs/METHODOLOGY.md`, sección 6.5: está escrita en el
+  procedimiento de `docs/DEPENDENCIES.md`. Ningún job de CI corre la suite en los pisos.
+- **Aprendizaje:** un `uv add` verifica los pisos de todas las dependencias, no solo los de
+  las que entran. El piso de scikit-learn se rompió sin que nadie tocara su línea.
+- **Referencias:** ADR 0003, ADR 0005, `docs/DEPENDENCIES.md`.
+
+### ERR-012 · Una emoji de MLflow dejó una corrida remota en RUNNING · 2026-10-18
+
+- **Síntoma:** la primera corrida contra DagsHub registró sus 49 métricas y sus etiquetas, y
+  el script murió al cerrarla: `UnicodeEncodeError: 'charmap' codec can't encode character
+  '\U0001f3c3'`, desde `mlflow.end_run`. La corrida quedó en estado RUNNING en el servidor.
+- **Mecanismo:** con un servidor remoto, `set_terminated` de MLflow escribe en `sys.stdout`
+  una línea que empieza con una emoji ("🏃 View run … at: …"). Con la salida redirigida a una
+  tubería (`| tee`), Python en Windows codifica stdout con la codificación local, cp1252, que
+  no tiene esa emoji. En `set_terminated` (mlflow 3.17.1) la línea se escribe **antes** de
+  `update_run_info`, así que la excepción corta el cierre y el estado nunca llega al servidor.
+  Con el store sqlite local no
+  ocurre, porque esa línea solo se imprime para servidores remotos: por eso ningún test ni el
+  ensayo previo con datos reales lo vieron.
+- **Cómo se detectó:** la primera corrida real contra DagsHub. Es `docs/METHODOLOGY.md`,
+  sección 6.4: una superficie nueva no se cierra sin un uso real.
+- **Corrección:** los dos scripts de la fase 2 reconfiguran stdout a UTF-8 al arrancar.
+  Control: un proceso con stdout redirigido que escribe la emoji sale con código 1 sin la
+  reconfiguración y con código 0 con ella. La corrida colgada (`2c86f39c…`) no se borró: se
+  cerró como FAILED, con la etiqueta `superseded` y su razón, y se repitió.
+- **Defensa:** nivel 1 para los dos scripts, porque la reconfiguración está en su código.
+  Nivel 3 para cualquier otro proceso que registre en un servidor remoto con stdout
+  redirigido. Es la misma familia que ERR-010: en Windows, la codificación por defecto de
+  Python no es UTF-8.
+- **Aprendizaje:** un store local no ejercita los caminos del store remoto. El primer uso
+  contra el servidor real es parte de la verificación, no un trámite.
+- **Referencias:** ERR-010, `scripts/run_default_models.py`, `scripts/run_leakage_check.py`.
+- **Nota de estado (2026-10-18):** es la tercera vez que la codificación por defecto de
+  Python en Windows cuesta una entrada (ERR-009, instancia relacionada; ERR-010; ERR-012). A
+  partir de aquí, **la defensa estándar del proyecto es que todo script reconfigure stdout a
+  UTF-8 al arrancar**, no que alguien lo recuerde cada vez. Hoy la cumplen los dos scripts de
+  la fase 2. `scripts/prepare_data.py` todavía no: queda pendiente, igual que subir la regla
+  al nivel 2 con un test que la verifique en cada script de `scripts/`.
+- **Nota de estado (2026-10-18), segunda:** `scripts/prepare_data.py` ya reconfigura stdout,
+  igual que los dos scripts de diagnóstico nuevos. Subir la regla al nivel 2 sigue pendiente.
+
+### ERR-013 · Un criterio a escala de la prevalencia y una permutación única dieron una alarma de fuga sin fuga · 2026-10-18
+
+- **Síntoma:** el test de objetivo barajado, con una sola permutación, marcó LightGBM en el
+  fold 2 con 14,83 veces la prevalencia, por encima del margen de 10, y quedó como bloqueante
+  (EVAL-002). En valor absoluto, el PR-AUC era 0,0112, contra los ~0,98 de la firma.
+- **Mecanismo:**
+  - Un criterio expresado como cociente contra una prevalencia de 7,6e-4 convierte ruido
+    indistinguible de cero en una alarma de 14,83×: en absoluto, 0,0112 contra los ~0,98 de
+    la firma. Una permutación única es una muestra de tamaño uno y no separa azar de fuga.
+  - El nulo tiene que ser el mismo modelo permutado: un ranking aleatorio sobre los mismos
+    folds llega a 1,50× como máximo en 100 sorteos, así que la escasez de positivos no
+    explica 14,8×.
+  - **Mecanismo medido, que contradice la hipótesis inicial del Arquitecto:** el AP no se
+    infla por precisión alta en la cabeza: el top 100 tiene **cero** positivos. Se infla por
+    saltos grandes de recall con precisión moderada. Tres bloques de puntaje idéntico (50, 20
+    y 7 filas), todas fraude y todas con firma, en los puestos ~1.400–1.550 y con precisión de
+    5–7%, aportan el 86,6% del AP; el bloque de 50 suma 11% de recall de golpe.
+  - **Por qué existen los bloques:** un modelo de árboles parte sobre la feature de la firma
+    incluso con etiquetas barajadas, porque el corte se elige por impureza sobre las etiquetas
+    de entrenamiento, y un grupo raro y perfectamente puro se ve localmente informativo por
+    azar. Puntaje idéntico es camino idéntico en todos los árboles. El valor de la hoja solo
+    necesitó quedar apenas encima de la tasa base de entrenamiento (0,001045 contra 0,00085)
+    para producir el salto. El bloque es puro fraude en validación por la relación real de la
+    firma, que el modelo **no** aprendió: solo agrupó por ella.
+  - **Lo que no se midió:** que el exceso de positivos barajados en filas de entrenamiento con
+    firma (4 observados contra 2,27 esperados) sea la causa de que esas hojas subieran.
+    Exigiría inspeccionar los árboles.
+  - **Consecuencia general:** el nulo de permutación de este dataset tiene una cola derecha
+    unas 10 veces más gorda que la de un ranking aleatorio, y la engorda la geometría de la
+    feature, no información de la etiqueta. El test sigue discriminando porque las etiquetas
+    reales dan ~0,98, dos órdenes por encima del peor caso del nulo.
+- **Cómo se detectó:** repitiendo el test con 20 permutaciones del mismo modelo y midiendo,
+  al lado, el clasificador aleatorio sobre los mismos folds (EVAL-003, EVAL-004). La
+  permutación que había fallado resultó ser el máximo de su distribución, reproducido al
+  dígito. La cabeza del ranking y la descomposición del AP por bloques las miden
+  `scripts/diagnose_head.py` y `scripts/diagnose_ap.py`.
+- **Corrección:** el criterio pasó a valor absoluto sobre la distribución de 20
+  permutaciones, con el ROC-AUC como segunda condición (ADR 0009, nota de estado). Con él, el
+  test pasa.
+- **Defensa:** test de permutación con N sorteos; criterio en valor absoluto; el ROC-AUC
+  como el discriminador que separa ruido de fuga —una fuga lo empuja hacia 1,0, el ruido lo
+  deja alrededor de 0,5 o por debajo—; y el clasificador aleatorio como control que descarta
+  la escasez. Nivel 2 de `docs/METHODOLOGY.md`, sección 6.5, cuando se corre
+  `scripts/run_leakage_check.py`, que sale con código 1 si el criterio falla. No corre en CI,
+  porque necesita los datos.
+- **Aprendizaje:** el nulo correcto de un test de objetivo barajado es una permutación del
+  mismo modelo, nunca una línea base aleatoria.
+- **Referencias:** ADR 0009 (nota de estado), EVAL-002, EVAL-003, EVAL-004.
+- **Nota del Ejecutor sobre las cifras (2026-10-18):**
+  - Que el modelo parte sobre la firma está medido: el LightGBM de esa permutación tiene 2
+    cortes sobre `amount_equals_origin_balance` en sus 100 árboles (`scripts/diagnose_ap.py`).
+  - 0,001045 es el puntaje del bloque, el que da el ensamble entero, no el valor de una sola
+    hoja.
+  - "Unas 10 veces más gorda" vale en el máximo: 0,0112 contra 0,00113, 9,9 veces; en el
+    percentil 95 son 4,2 veces (0,00345 contra 0,00083).
+  - "Dos órdenes por encima" son, medido, 0,98 / 0,0112 ≈ 87 veces.
+
+### ERR-014 · LightGBM con sus valores por defecto diverge, y un detector que no aprende no detecta · 2026-10-18
+
+- **Síntoma:** con etiquetas reales, LightGBM con sus hiperparámetros por defecto da recall 0 a
+  precisión ≥ 0,99 en los 10 folds, con PR-AUC de 0,034 ± 0,072 (temporal) y ROC-AUC de 0,47
+  (EVAL-008). Con los mismos folds, la regla da 0,979 y Random Forest, 0,998.
+- **Mecanismo:** el entrenamiento diverge. Lo que sigue es una **medición ad hoc, sin
+  versionar** (un solo ajuste sobre el fold 5 temporal, con etiquetas reales, evaluado
+  iteración por iteración):
+
+  | Iteración | 1 | 5 | 20 | 50 | 100 |
+  |---|---|---|---|---|---|
+  | PR-AUC de entrenamiento | 0,9956 | 0,9895 | 0,9668 | 0,4443 | 0,0008 |
+  | PR-AUC de validación | 0,9978 | 0,9956 | 0,9701 | 0,3866 | 0,0008 |
+  | Puntaje crudo máximo en validación, en valor absoluto | 122 | 1.285 | 17.484 | 79.355 | 31 millones |
+
+  En la primera iteración el modelo ya ordena casi perfecto, y después los puntajes crudos
+  crecen sin cota y el PR-AUC colapsa **también en entrenamiento**. Por eso no es sobreajuste y
+  no es el arnés midiendo mal: es el entrenamiento que se va. Por qué los valores por defecto
+  divergen en estos datos (pasos de Newton sin cota sobre una clase rara y casi separable) es
+  una hipótesis no medida.
+- **Consecuencia sobre el control, que es lo importante:** un modelo que no aprende la
+  etiqueta verdadera tampoco aprendería una filtrada, así que **el paso de LightGBM por el test
+  de permutación no prueba nada**. El control se sostiene en los dos detectores que sí
+  aprenden: la regresión logística (0,0050 permutado contra 0,9967 real) y Random Forest
+  (0,00082 contra 0,9983). Está escrito en EVAL-004 (nota de estado) y en EVAL-008.
+- **Cómo se detectó:** la evaluación de los modelos con etiquetas reales, corrida después del
+  test de permutación. Un resultado de cero en un modelo que debería aprender al menos la firma
+  no se registró sin diagnóstico.
+- **Corrección:** ninguna en el modelo; ajustar los hiperparámetros es el turno 2B. El
+  docstring de `scripts/run_leakage_check.py`, que llamaba a LightGBM "el detector más
+  sensible", se corrigió.
+- **Defensa:** nivel 3 de `docs/METHODOLOGY.md`, sección 6.5: está escrito aquí. La defensa
+  que falta es de método: un detector de fuga se valida antes con las etiquetas reales,
+  porque si no aprende, su paso por el test no tiene poder.
+- **Aprendizaje:** el control de un test necesita su propio control positivo. Es
+  `docs/METHODOLOGY.md`, sección 6.1, aplicada al detector: una métrica que no puede fallar no
+  prueba nada, y un detector que no puede detectar, tampoco.
+- **Referencias:** EVAL-004, EVAL-008, ERR-013.
+- **Pendiente:** versionar la medición por iteración. Hasta entonces, sus cifras son de este
+  cuaderno de laboratorio y no sostienen ningún documento entregable.
