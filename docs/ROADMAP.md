@@ -294,11 +294,11 @@ archivo ya existe hacen fallar el test.
 | features | pipeline | existe |
 | models | baseline | existe |
 | models | estimators | existe |
-| models | search_space | fase 2 |
+| models | search_space | existe |
 | models | evaluation | existe |
 | models | fit_guard | existe |
 | models | tracking | existe |
-| models | registry | fase 2 |
+| models | registry | existe |
 | tracking | mlflow_setup | existe |
 | explain | global_explain | fase 3 |
 | explain | local_explain | fase 3 |
@@ -316,7 +316,8 @@ direcciones, con las mismas reglas.
 | Script | Qué hace | Estado |
 |---|---|---|
 | `prepare_data.py` | CSV → dos parquet, validación y mediciones | existe |
-| `run_training.py` | El AutoML | fase 2 |
+| `run_training.py` | El AutoML: la búsqueda con el algoritmo como hiperparámetro | existe |
+| `register_model.py` | Mide la estabilidad de la configuración elegida con tres semillas, la ajusta sobre toda la referencia, la serializa y la registra en MLflow | existe |
 | `run_default_models.py` | Los baselines y las tres familias con hiperparámetros por defecto, por los dos splitters | existe |
 | `run_leakage_check.py` | La prueba del objetivo barajado, como test de permutación con el clasificador aleatorio como control; es de la fase 2 porque necesita un modelo contra el que barajar | existe |
 | `diagnose_head.py` | Qué tiene la cabeza del ranking de un modelo permutado (ERR-013) | existe |

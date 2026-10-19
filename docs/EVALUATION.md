@@ -41,6 +41,23 @@ del modelo, la precisión que alcanza con el recall de la regla
 (`precision_at_baseline_recall`) y el recall que alcanza con su precisión
 (`recall_at_baseline_precision`).
 
+**Regla de desempate entre configuraciones.** La declaró el Arquitecto el 2026-10-19 a las
+08:09, con la búsqueda de hiperparámetros en curso y antes de leer ninguno de sus resultados.
+Lo único que ya se había visto: un ensayo corto, en un almacenamiento descartable, corrió los
+tres puntos de partida, que son las mismas configuraciones que los ensayos 0 a 2 de la
+búsqueda.
+
+- El rango usable de la métrica de decisión mide 0,021, de 0,9788 (el baseline) a 1,0. Con
+  la significancia práctica en 0,005, se distinguen a lo sumo cuatro niveles, así que es
+  esperable que varias configuraciones queden indistinguibles arriba.
+- **Todo ensayo que quede dentro de 0,005 del mejor se reporta como empate, no como peor.**
+- El desempate **no** es el tercer decimal. Es, en este orden:
+  1. el costo de ajuste medido;
+  2. la simplicidad de la configuración: menos profundidad, menos árboles, menos features;
+  3. la dispersión entre folds: a menor dispersión, mayor confianza.
+- El reporte dice cuántas configuraciones empataron, no solo cuál ganó. Coronar un ganador por
+  el tercer decimal de una media de cinco folds es ruido presentado como resultado.
+
 ---
 
 ## Formato de entrada
@@ -225,3 +242,69 @@ EVAL-006), y Random Forest, con una (máximo 0,00082 contra 0,9983, EVAL-007).
 | **Run de MLflow** | `8f65764af11d43af8adf82aa19f8c6fb` (temporal), `ef0d141550234b799e309c56182e94cb` (estratificado) |
 | **Reproducción** | `uv run python scripts/run_default_models.py --models lightgbm` |
 | **Interpretación** | Con sus valores por defecto, LightGBM no aprende en estos datos. **No** permite concluir que la familia no sirva: una medición ad hoc del Ejecutor, no versionada, mostró que el entrenamiento diverge (el PR-AUC es alto en las primeras iteraciones y colapsa al llegar a la 100, también en entrenamiento). Esas cifras quedan en el reporte del turno hasta que la medición se versione. Consecuencia para EVAL-004: como detector de fuga, LightGBM por defecto no tenía poder |
+
+### EVAL-009 · Búsqueda de hiperparámetros con el algoritmo como hiperparámetro: 8 de 150 ensayos · 2026-10-19
+
+| Campo | Valor |
+|---|---|
+| **Pregunta** | ¿Qué configuración maximiza el recall con precisión ≥ 0,99, cuando el algoritmo es un hiperparámetro más? |
+| **Periodo evaluado** | Referencia, splitter temporal: valida 201–400 en 5 ventanas de 40 steps |
+| **Tamaño de muestra** | Como en EVAL-005: 3.404.848 filas validadas, con 2.223 positivos |
+| **Método** | Optuna 5.0 con muestreador TPE (semilla `settings.RANDOM_STATE`) y podador de mediana sobre el valor de cada fold; estudio en SQLite. El algoritmo (regresión logística, Random Forest o LightGBM) es categórico, sobre la configuración `full`, con el espacio de `models/search_space.py`. Los ensayos 0 a 2 son los puntos de partida: los valores por defecto donde caben en el espacio y la cota más permisiva donde no. Presupuesto: 4 h o 150 ensayos. **Se cortó a los 8 ensayos terminados (~38 min) por presión de memoria**; el ensayo 8 quedó marcado como FAIL |
+| **Métrica** | La media, sobre los 5 folds, del recall con precisión ≥ 0,99. Empates y desempate según la regla del contrato, escrita antes de leer los resultados |
+| **Resultado** | Ver la tabla de abajo. **Empatan cuatro configuraciones** a menos de 0,005 del mejor (el ensayo 3, 0,9978): los ensayos 1, 3, 5 y 6. Por el primer criterio, el costo de ajuste, **gana el ensayo 5** (LightGBM, 59 s, contra 625–960 s de los RF) |
+| **Baseline** | `SignatureRule` sobre los mismos folds: 0,9788 ± 0,0101 (EVAL-005). Los puntos de partida (ensayos 0 a 2) y los valores por defecto reales: regresión logística 0,9911, Random Forest 0,9983, LightGBM 0 (EVAL-006 a EVAL-008) |
+| **Número de particiones** | 5 folds temporales por ensayo |
+| **Dispersión** | Desviación estándar muestral (ddof = 1) entre los 5 folds de cada ensayo |
+| **Run de MLflow** | Corrida padre `613513c493774f1e804f76cd02d4c63b` (cerrada como KILLED, con la etiqueta `cut_reason`), y una hija por ensayo: `1b8397e44f5f473aad223ca2a7bae02f` (0), `ce364f17fcec4322b4e4675c6eaef56f` (1), `560e866405d441608967fadb5bc5a29e` (2), `b86250c6d9f344bcb91a9581d0d2fde9` (3), `23d9192f1122457a8b8cb7aa7f884dd4` (4), `354bd9179fdf40aaa2c57cdfb7c34b9b` (5), `d25c81ad35c445398c535c5a62caad56` (6), `032e04b492004c03918d43ac23b277db` (7) |
+| **Reproducción** | `uv run python scripts/run_training.py` continúa el estudio guardado en `optuna.db`, que no está versionado; en un clon limpio empieza un estudio nuevo con los mismos tres puntos de partida |
+| **Interpretación** | Ver abajo |
+
+| Ensayo | Familia y configuración | Recall @ P≥0,99 | `fit` total² | Lectura |
+|---|---|---|---|---|
+| 0 | Regresión logística, punto de partida (C 1, sin pesos) | 0,9911 ± 0,0028 | 23 s | completo |
+| 1 | RF, punto de partida (100 árboles, profundidad 16, hoja 20, sqrt) | 0,9974 ± 0,0039 | 625 s | **empate** |
+| 2 | LightGBM, punto de partida (100 árboles, lr 0,1, 31 hojas, profundidad 12, min_child 20, reg_lambda 0,001) | 0 | 42 s | diverge |
+| 3 | RF (140 árboles, profundidad 6, hoja 32, log2, balanced_subsample) | 0,9978 ± 0,0037 | 960 s | **empate**, el punto más alto |
+| 4 | Regresión logística (C 0,008, balanced) | 0,9859 ± 0,0091 | 26 s | completo |
+| 5 | LightGBM (98 árboles, lr 0,027, 56 hojas, profundidad 7, min_child 249, reg_lambda 0,010, scale_pos_weight 34,9) | 0,9970 ± 0,0036 | **59 s** | **empate, elegido** |
+| 6 | LightGBM (109 árboles, lr 0,0125, 122 hojas, profundidad 12, min_child 269, reg_lambda 0,033, scale_pos_weight 2,0) | 0,9970 ± 0,0036 | 72 s | **empate** |
+| 7 | Regresión logística (C 0,30, balanced) | 0,9763 en el fold 1 | 4 s | podado |
+
+² *Costos medidos con swap.* Durante la búsqueda, la memoria disponible bajó hasta 231 MB y el
+archivo de paginación pasó de 16% a 25%. Los costos están inflados, sobre todo los de Random
+Forest; que el orden entre familias (LightGBM unas 10 veces más barato) resista esa inflación
+es una inferencia, no una medición.
+
+**Interpretación.**
+
+- **Resultado negativo, regresión logística:** la búsqueda no mejoró el punto de partida, que
+  coincide con el valor por defecto real (0,9911).
+- **Resultado negativo, Random Forest:** la búsqueda empató con el valor por defecto sin acotar
+  (0,9983, EVAL-007) y con su propio punto de partida acotado (0,9974). Acotar RF a una
+  configuración desplegable cuesta 0,0009 en el punto de partida, por debajo del umbral.
+- **Resultado positivo, LightGBM:** pasó de divergir (0) a 0,9970. Qué parámetro contiene la
+  divergencia no está determinado: los ensayos 5 y 6 subieron `min_child_samples` a ~250 **y**
+  bajaron la tasa de aprendizaje a la vez, con `reg_lambda` todavía chico.
+- Los ensayos 5 y 6 tienen recalls por fold idénticos, y los cuatro empatados comparten 0,9914
+  en el fold 1. Es coherente con la resolución de la métrica: en un fold de ~456 positivos, el
+  recall se mueve en pasos de ~0,0022.
+- **No permite concluir** que una búsqueda completa no encontraría algo mejor: el presupuesto
+  se cortó en 8 de 150 ensayos.
+
+### EVAL-010 · Estabilidad de la configuración elegida ante la semilla · 2026-10-19
+
+| Campo | Valor |
+|---|---|
+| **Pregunta** | La configuración elegida está cerca de la región donde LightGBM diverge (ERR-014). ¿Su métrica de decisión se mantiene si cambia la semilla? |
+| **Periodo evaluado** | Referencia, splitter temporal: valida 201–400 en 5 ventanas de 40 steps |
+| **Tamaño de muestra** | Como en EVAL-005 |
+| **Método** | El ensayo 5 de EVAL-009 reajustado por el arnés con las semillas 43, 44 y 45 (`settings.RANDOM_STATE + 1, + 2, + 3`; el ensayo original usó 42). Criterio, fijado antes de medir: cada media dentro de la dispersión ya medida del ensayo 5 (±0,0036); si no, no se serializa |
+| **Métrica** | Recall con precisión ≥ 0,99; PR-AUC y Brier al lado, para saber si la semilla cambió algo |
+| **Resultado** | Las tres semillas dan el **mismo recall por fold** que el ensayo 5: 0,9914 · 0,9956 · 1,0 · 1,0 · 0,9978, es decir 0,9970 ± 0,0036, con distancia 0,0000. La semilla **sí** cambia el modelo: el PR-AUC del fold 1 da 0,99270, 0,99294 y 0,99315, y el Brier se mueve en la segunda cifra significativa |
+| **Baseline** | El ensayo 5, semilla 42: 0,9970 ± 0,0036 |
+| **Número de particiones** | 5 folds temporales × 3 semillas |
+| **Dispersión** | Desviación estándar muestral (ddof = 1) entre los 5 folds de cada semilla |
+| **Run de MLflow** | `407b9dc2f5e14fc69cf1e6bfe215ebd3` (43), `ff284846e2324d9383491803c1fe8d2c` (44), `275800d052f24f8fa84079ece18657ff` (45) |
+| **Reproducción** | `uv run python scripts/register_model.py` (el paso 1) |
+| **Interpretación** | La inquietud queda cerrada para la semilla, y se midió. La medición no era vacía: el PR-AUC muestra que el modelo cambió con la semilla. Con `subsample` y `colsample_bytree` en 1, la vía más probable es la muestra de filas con que LightGBM construye los bins, pero eso es hipótesis y no medición. Lo que la medición **no** cubre: la sensibilidad a los hiperparámetros vecinos, que es otra pregunta |
