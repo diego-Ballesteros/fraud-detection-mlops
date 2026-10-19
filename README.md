@@ -2,126 +2,146 @@
 
 Detección de fraude en transacciones móviles sobre el dataset sintético **PaySim**, con
 optimización de hiperparámetros, interpretabilidad local y global, y monitoreo de desempeño y
-de drift sobre un periodo de producción real. Es el proyecto final del Curso III de la
+de drift sobre un periodo de producción real. Proyecto final del Curso III de la
 especialización en Machine Learning Engineering.
 
-El problema tiene un desbalance extremo: en el periodo de referencia hay 4.477 fraudes entre
-5.787.030 transacciones, el 0,0774%. Con esa prevalencia, la accuracy de un clasificador que
-nunca marca fraude supera el 99,9% y no dice nada. Por eso cada métrica de este repositorio se
-reporta con su baseline al lado, con su dispersión entre particiones, y con la métrica
-declarada **antes** de medir.
-
-**Estado:** entrega parcial. Las fases 0 (fundación) y 1 (datos y EDA) están cerradas; la
-fase 2 (modelado) tiene el arnés de evaluación y los baselines medidos, y le falta la búsqueda
-de hiperparámetros. El detalle está en [Estado contra la rúbrica](#estado-contra-la-rúbrica).
+**Estado:** entrega parcial; lo que falta está en [Qué falta](#5--qué-falta). Cómo se trabaja y
+cómo se verifica cada cifra está en [`docs/METHODOLOGY.md`](docs/METHODOLOGY.md).
 
 ---
 
-## La regla dura del proyecto: el corte temporal
+## 1 · El problema
 
-```
-step <= 400   →  referencia: entrenamiento y ajuste de todo
-step >= 401   →  producción
-```
+Una plataforma de pagos móviles procesa millones de transacciones y tiene que decidir, en el
+momento, cuáles bloquear o mandar a revisión. Los dos errores no cuestan lo mismo: un **falso
+positivo** cuesta el tiempo de un analista que revisa una transacción legítima, y un **falso
+negativo** cuesta el monto de la transacción fraudulenta que pasó.
 
-**Ninguna fila de producción influye en el ajuste de nada:** ni del modelo, ni del
-preprocesador, ni de un umbral, ni de un estadístico. Los dos periodos se escriben en archivos
-parquet separados, así que leer producción exige nombrarla y queda a la vista en el código.
-
-Producción **todavía no se midió, a propósito.** Sobre ella solo se validaron propiedades del
-registro (dominios, nulos, partición), con chequeos que responden verdadero o falso y nunca un
-conteo, y se contaron sus filas desde el pie del archivo parquet, sin leer ninguna. La prevalencia, las distribuciones y el desempeño en producción se miden en la fase 4,
-la de monitoreo.
+El fraude es rarísimo. En el periodo de referencia hay 4.477 fraudes entre 5.787.030
+transacciones, el **0,0774%**: de cada 10.000 transacciones, unas 8 son fraude. Un modelo que
+responda "nunca es fraude" acierta el 99,92% de las veces y no detecta ninguno. Por eso en este
+proyecto **la exactitud no se usa para evaluar ningún modelo**: con esta prevalencia, un número
+alto de exactitud no distingue un detector de uno que no hace nada.
 
 ---
 
-## El hallazgo central: la firma del simulador
+## 2 · La estrategia
 
-La regla
+**El tiempo se respeta.** Las transacciones están ordenadas por hora (`step`). Las primeras 400
+horas son la **referencia**: con ellas se entrena y se ajusta todo. De la hora 401 en adelante es
+**producción**, y ninguna fila de producción influye en nada: ni en el modelo, ni en el
+preprocesamiento, ni en un umbral, ni en un estadístico. Producción todavía no se miró, a
+propósito: solo se validó que el registro esté bien formado. Se va a usar una sola vez, para
+medir cómo se comporta el modelo y cuánto cambian los datos en un periodo que nunca vio.
+
+**La regla obvia es la vara.** La regla
 
 ```
 type ∈ {TRANSFER, CASH_OUT}  ∧  amount > 0  ∧  amount == oldbalanceOrg
 ```
 
-dispara en **4.385** filas de referencia, y **las 4.385 son fraude**, con **cero falsos
-positivos** en las 5.782.553 filas legítimas: precisión 1,000 y recall 0,979. Deja fuera 92
-fraudes.
+("la transacción se lleva el saldo completo") marca 4.385 transacciones de referencia, **las
+4.385 son fraude**, y no marca ninguna de las 5.782.553 legítimas. No es una fuga de
+información: el monto y el saldo existen antes de la transacción. Es una firma del simulador,
+cuyo agente de fraude toma una cuenta e intenta vaciarla; en datos reales habría transferencias
+legítimas por el saldo completo. Como la regla ya resuelve casi todo, es el **baseline
+obligatorio** de todo el proyecto, y el problema de machine learning es lo que deja fuera: 92
+fraudes ([ADR 0007](docs/adr/0007-simulator-signature-baseline.md)).
 
-**No es fuga.** Las dos columnas existen antes de la transacción: el monto pedido y el saldo
-propio de quien la pide. Es una **firma determinista del generador**: el agente de fraude de
-PaySim toma una cuenta e intenta vaciarla. En datos reales habría transferencias legítimas
-por el saldo completo, y la regla no tendría esta precisión.
-
-Por eso **la regla es el baseline obligatorio de todo el proyecto**, y el problema de machine
-learning son los 92 fraudes que no cubre. La decisión y sus consecuencias están en el
-[ADR 0007](docs/adr/0007-simulator-signature-baseline.md); la medición, en el
-[diccionario de datos](docs/DATA_DICTIONARY.md), sección 4.a.
+**La métrica se eligió antes de medir.** La métrica de decisión es el **recall con precisión ≥
+0,99**: cuántos fraudes se detectan si se exige que, de cada 100 alertas, a lo sumo una sea
+falsa. El PR-AUC global, la métrica habitual en clases desbalanceadas, no servía aquí: cualquier
+modelo que aprenda la firma llega a ~0,98, y entonces no separa a un modelo de otro. También se
+fijó antes de medir que una diferencia menor que 0,005 de recall, unos 22 fraudes, no cuenta como
+mejora ([ADR 0009](docs/adr/0009-evaluation-design.md)).
 
 ---
 
-## Resultados actuales
+## 3 · Resultados
 
-Recall con precisión ≥ 0,99, sobre los 5 folds temporales (cada fold valida 40 steps y entrena
-con toda la historia anterior: steps 201–400 validados en total), media ± desviación estándar
-muestral entre folds. Todos los modelos con hiperparámetros por defecto y la configuración de
-features `full`.
+La validación sigue el uso real: el modelo entrena con toda la historia disponible y predice las
+40 horas siguientes, cinco veces, cubriendo las horas 201 a 400. Cifras como media ± desviación
+estándar entre esos cinco folds; todos los modelos con sus hiperparámetros por defecto.
 
 | Modelo | Recall @ precisión ≥ 0,99 | Contra la regla, en los mismos folds¹ |
 |---|---|---|
 | `SignatureRule` (baseline) | 0,9788 ± 0,0101 | — |
 | Regresión logística | 0,9911 ± 0,0028 | +0,0123 ± 0,0090 (+28 fraudes) |
 | Random Forest | 0,9983 ± 0,0038 | +0,0195 ± 0,0098 (+44 fraudes) |
-| LightGBM (por defecto) | 0 | diverge: ver [ERR-014](docs/ERRORS_AND_LEARNINGS.md) |
+| LightGBM (por defecto) | 0 | el entrenamiento diverge |
 
-- **La métrica de decisión se declaró antes de medir.** El PR-AUC global está saturado por la
-  firma: cualquier modelo que la aprenda llega a ~0,98. Lo que separa a los modelos es cuánto
-  recuperan más allá de la regla con precisión alta ([ADR 0009](docs/adr/0009-evaluation-design.md)).
-- **El umbral de significancia práctica, +0,005 de recall, también se declaró antes.**
-  Regresión logística y Random Forest lo superan.
-- **El contraste estratificado resultó más bajo que el temporal**¹, no más alto: −0,0036 en
-  regresión logística y −0,0052 en Random Forest. Se esperaba que ignorar el tiempo fuera
-  optimista, y en estos datos no lo fue.
+**Qué significa cada cifra:**
 
-Antes de comparar modelos, el arnés pasó dos controles: el predictor constante da exactamente
-la prevalencia de cada fold, y un test de permutación con el objetivo barajado no encuentra
-fuga ([EVAL-001 a EVAL-004](docs/EVALUATION.md)). Esa conclusión se apoya en la regresión
-logística y en Random Forest: LightGBM por defecto no aprende ni con las etiquetas reales, así
-que como detector no tenía poder ([ERR-014](docs/ERRORS_AND_LEARNINGS.md)). Cada resultado tiene su entrada completa en
-el [registro de evaluación](docs/EVALUATION.md).
+- **La regla.** Sobre toda la referencia, su precisión es 1,000: **toda transacción que marca es
+  fraude**, y ninguna alerta le hace perder tiempo a un analista. Su recall es 0,979: se le
+  escapan 92 de los 4.477 fraudes. En los folds de validación deja pasar entre 3 y 14 por fold,
+  48 en total ([EVAL-005](docs/EVALUATION.md)).
+- **Random Forest** detecta 44 fraudes más que la regla, de los 48 que se le escapan, **sin bajar
+  de precisión 0,99**: a lo sumo un falso positivo por cada cien alertas. Los 4 que no detecta
+  caen todos en el fold 1, el que entrena con menos historia ([EVAL-007](docs/EVALUATION.md)).
+  Eso es consistente con que el modelo mejore con la historia acumulada, que es justo lo que la
+  validación temporal deja ver; con un único fold que falla, no alcanza para afirmarlo.
+- **La regresión logística** detecta 28 fraudes más que la regla, con la misma exigencia de
+  precisión. Las dos mejoras superan el umbral de 0,005 fijado antes de medir.
+- **LightGBM** con sus valores por defecto no es que rinda poco: el entrenamiento diverge y los
+  puntajes crecen sin cota hasta que el modelo deja de distinguir nada (medición ad hoc, sin
+  versionar: [ERR-014](docs/ERRORS_AND_LEARNINGS.md)). Ajustar sus hiperparámetros es parte de la búsqueda
+  pendiente.
+- **Ignorar el tiempo no resultó más optimista.** Con folds aleatorios estratificados, el recall
+  de la regresión logística baja 0,0036 y el de Random Forest, 0,0052¹. El esquema temporal no
+  está castigando a los modelos. Por qué el aleatorio da algo menos no está determinado: los dos
+  esquemas validan sobre filas distintas (horas 201–400 contra 1–400), y solo el último fold
+  temporal entrena con más filas (5,19 M) que un fold aleatorio (4,63 M; la métrica
+  `train_rows` de cada corrida en MLflow).
+
+Todas las corridas, con sus métricas por fold, están en MLflow sobre DagsHub, en el experimento
+`fraud-detection`:
+**https://dagshub.com/diego-Ballesteros/fraud-detection-mlops.mlflow/#/experiments/0**
+(que el enlace abra sin credenciales todavía no está verificado). Cada resultado tiene su entrada
+completa en el [registro de evaluación](docs/EVALUATION.md).
 
 ¹ *Cálculo ad hoc.* La diferencia pareada, su conteo en fraudes y la diferencia entre
-splitters son restas por fold sobre métricas que produce el arnés, que sí tiene tests; la
-resta misma no tiene función ni test propios.
+esquemas son restas por fold sobre métricas que produce el arnés, que sí tiene tests; la resta
+misma no tiene función ni test propios.
 
 ---
 
-## Experiment tracking
+## 4 · Por qué estas cifras son creíbles
 
-Todas las corridas están registradas en MLflow sobre DagsHub, en el experimento
-`fraud-detection`:
+Un recall de 0,998 en fraude es el tipo de número que, casi siempre, delata una fuga: alguna
+columna que lleva la respuesta. Para que estas cifras estuvieran mal, el modelo tendría que estar
+viendo la etiqueta por algún camino. Se midió que no:
 
-**https://dagshub.com/diego-Ballesteros/fraud-detection-mlops.mlflow/#/experiments/0**
+- **Test de permutación.** Se barajan las etiquetas de entrenamiento y se reentrena por el
+  mismo camino: 20 veces, con semillas distintas, para la regresión logística, y una vez para
+  Random Forest. Si hubiera fuga, el modelo seguiría acertando. La regresión logística cae de
+  0,9967 a un máximo de 0,005 de PR-AUC, y Random Forest, de 0,9983 a 0,0008: lo que aprenden
+  sale de las etiquetas reales.
+- **El piso del azar.** Un ranking al azar sobre las mismas validaciones da como máximo 1,5 veces
+  la prevalencia en 100 sorteos. Es la referencia contra la que se lee el test de permutación.
+- **Sin solapamiento temporal.** Un test afirma que ninguna hora aparece a la vez en
+  entrenamiento y en validación del mismo fold; el mismo test, aplicado a un divisor por filas,
+  falla. Otro afirma que el predictor constante da exactamente la prevalencia de cada fold.
 
-Cada corrida lleva el modelo, el splitter, la configuración de features, las métricas por fold
-y sus agregados, el sha256 del parquet de referencia y el commit desde el que se corrió. Que el
-enlace se abra sin credenciales todavía no está verificado: es un punto de la fase 5.
+El detalle está en [EVAL-001 a EVAL-004](docs/EVALUATION.md) y en el
+[ADR 0009](docs/adr/0009-evaluation-design.md).
 
 ---
 
-## Estado contra la rúbrica
+## 5 · Qué falta
 
 | Componente | Peso | Estado |
 |---|---|---|
 | Repositorio | 10% | Estructura, CI, pre-commit y los datos fuera de git: hecho. Notebook `01_preprocessing`: hecho. Notebooks 02, 03 y 04: pendientes. La carpeta `app/` existe, vacía |
-| Documentación | 10% | Diccionario de datos, nueve ADR, registros de evaluación y de errores, y este README: hecho para las fases 0 a 2A |
-| Técnicas avanzadas de ML | 50% | Arnés de evaluación, baselines y registro en MLflow: hecho. **Búsqueda de hiperparámetros: pendiente.** Interpretabilidad local y global: pendiente (fase 3) |
-| Monitoreo | 30% | **Sin empezar** (fase 4) |
+| Documentación | 10% | Diccionario de datos, nueve ADR, registros de evaluación y de errores, y este README: hecho para lo construido hasta ahora |
+| Técnicas avanzadas de ML | 50% | Arnés de evaluación, baselines y registro en MLflow: hecho. **Búsqueda de hiperparámetros: pendiente.** Interpretabilidad local y global: pendiente |
+| Monitoreo | 30% | **Sin empezar** |
 | Reto ML 1: AutoML | +10% | Pendiente |
 | Reto ML 2: app web de monitoreo | +10% | Pendiente |
 
 ---
 
-## Reproducir
+## 6 · Cómo reproducir
 
 Requisitos: [UV](https://docs.astral.sh/uv/), el único gestor de paquetes del proyecto, y
 Python 3.11 (si no está instalado, `uv` lo descarga). Opcional:
@@ -148,20 +168,20 @@ task notebooks                          # solo local: necesita data/, que CI no 
 `task notebooks` ejecuta cada notebook desde un kernel limpio, con el modo UTF-8 de Python
 activado ([ERR-010](docs/ERRORS_AND_LEARNINGS.md)).
 
-Los resultados de arriba se regeneran con los scripts de la fase 2. Registran en DagsHub si
-`.env` tiene las credenciales (plantilla en `.env.example`), y si no, en un store local:
+Los resultados se regeneran con dos scripts. Registran en DagsHub si `.env` tiene las
+credenciales (plantilla en `.env.example`), y si no, en un store local:
 
 ```bash
-uv run python scripts/run_leakage_check.py    # controles: aleatorio y test de permutación
-uv run python scripts/run_default_models.py   # los modelos, por los dos splitters
+uv run python scripts/run_leakage_check.py    # controles: azar y test de permutación
+uv run python scripts/run_default_models.py   # los modelos, por los dos esquemas
 ```
 
 ---
 
-## Dónde está cada cosa
+## 7 · Dónde está cada cosa
 
-- [`docs/ROADMAP.md`](docs/ROADMAP.md): el plan por fases, la estructura del repositorio y la
-  trazabilidad contra la rúbrica.
+- [`docs/ROADMAP.md`](docs/ROADMAP.md): el plan, la estructura del repositorio y la trazabilidad
+  contra la rúbrica.
 - [`docs/METHODOLOGY.md`](docs/METHODOLOGY.md): cómo se trabaja y cómo se verifica.
 - [`docs/DATA_DICTIONARY.md`](docs/DATA_DICTIONARY.md): las columnas, cuándo existe cada una,
   las features derivadas y las columnas prohibidas.

@@ -7,9 +7,10 @@ requires-python = ">=3.11,<3.12"
 # Floors are the minimum the project needs, not the latest release on the day `uv add` ran,
 # and sit on a major version where the API matters (docs/adr/0003-dependency-bounds.md).
 dependencies = [
-    "lightgbm>=4.0",
-    "matplotlib>=3.7",
+    "lightgbm>=4.1",
+    "matplotlib>=3.8.4",
     "mlflow>=3.9,<4",
+    "optuna>=5.0",
     "pandas>=2.2,<3",
     "pyarrow>=16",
     "pydantic>=2.3",
