@@ -330,6 +330,16 @@ correlativo.
 - **Aprendizaje:** un `uv add` verifica los pisos de todas las dependencias, no solo los de
   las que entran. El piso de scikit-learn se rompió sin que nadie tocara su línea.
 - **Referencias:** ADR 0003, ADR 0005, `docs/DEPENDENCIES.md`.
+- **Nota de estado (2026-10-18):** el mismo mecanismo alcanzó dos pisos más, y la suite en
+  verde no lo vio. Con numpy 2.4.6 en los pisos, lightgbm 4.0.0 falla al ajustar sobre un
+  DataFrame (`np.find_common_type was removed in the NumPy 2.0 release`) y
+  `matplotlib.pyplot` 3.7.0 no importa (`numpy.core.multiarray failed to import`). La
+  verificación al agregar mlflow y lightgbm había dado 142 tests en verde, porque ningún test
+  ajustaba LightGBM ni importaba `pyplot`. Lo encontró la verificación al agregar optuna,
+  porque para entonces existía el test de `splits_on`, que ajusta LightGBM. Los pisos subieron
+  por la política del ADR 0003 a `lightgbm>=4.1` y `matplotlib>=3.8.4` (los dos medidos), y la
+  verificación ahora comprueba aparte lo que la suite no ejerce. **Aprendizaje agregado:** una
+  suite en verde en los pisos prueba lo que la suite ejecuta, no la dependencia entera.
 
 ### ERR-012 · Una emoji de MLflow dejó una corrida remota en RUNNING · 2026-10-18
 
