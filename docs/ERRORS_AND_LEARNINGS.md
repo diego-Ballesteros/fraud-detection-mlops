@@ -538,3 +538,24 @@ correlativo.
 - **Aprendizaje:** que un trabajo largo sea reanudable no es un lujo: es lo que convirtió un
   corte en un resultado parcial en vez de en una pérdida.
 - **Referencias:** EVAL-009, ADR 0010.
+
+### ERR-018 · Un medidor de memoria leyó una llamada fallida como "cero" · 2026-10-20
+
+- **Síntoma:** un medidor ad hoc del pico de memoria del proceso, escrito con `ctypes` sobre
+  `GetProcessMemoryInfo`, reportó "pico 0 MB" después de cargar las 5.787.030 filas de
+  referencia.
+- **Mecanismo:** las funciones de `ctypes` sin `restype` ni `argtypes` declarados reciben y
+  devuelven `int` de C. El pseudo-handle de `GetCurrentProcess` (−1) no llega como un `HANDLE`
+  válido, y `GetProcessMemoryInfo` falla: devuelve 0 y deja el error 6,
+  `ERROR_INVALID_HANDLE` (medido). El medidor no miraba el valor de retorno y leyó la
+  estructura inicializada en ceros como si fuera el resultado. Que el −1 se trunque a 32 bits
+  en el paso es la causa probable del handle inválido, no medida.
+- **Cómo se detectó:** el valor era imposible. Un fallo que dejara valores plausibles no se
+  habría detectado así.
+- **Corrección:** `restype` y `argtypes` declarados, el valor de retorno se verifica, y un
+  control positivo antes de confiar en él: asignar 200 MB subió el pico 200 MB.
+- **Defensa:** nivel 3: es un instrumento ad hoc, no versionado.
+- **Aprendizaje:** es `docs/METHODOLOGY.md`, sección 7.6, otra vez. Una llamada cuyo fallo
+  deja un resultado en ceros tiene que verificar su retorno, y el instrumento se prueba contra
+  un caso conocido antes de leerlo.
+- **Referencias:** ERR-016.

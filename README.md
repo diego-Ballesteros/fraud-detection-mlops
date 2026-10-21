@@ -134,8 +134,8 @@ El detalle está en [EVAL-001 a EVAL-004](docs/EVALUATION.md) y en el
 | Componente | Peso | Estado |
 |---|---|---|
 | Repositorio | 10% | Estructura, CI, pre-commit y los datos fuera de git: hecho. Notebook `01_preprocessing`: hecho. Notebooks 02, 03 y 04: pendientes. La carpeta `app/` existe, vacía |
-| Documentación | 10% | Diccionario de datos, diez ADR, registros de evaluación y de errores, y este README: hecho para lo construido hasta ahora |
-| Técnicas avanzadas de ML | 50% | Arnés de evaluación, baselines y registro en MLflow: hecho. Búsqueda de hiperparámetros: hecha, pero incompleta (8 de 150 ensayos, [EVAL-009](docs/EVALUATION.md)). Modelo elegido serializado y registrado en el Model Registry: hecho ([ADR 0010](docs/adr/0010-chosen-configuration.md)). **Interpretabilidad local y global: pendiente** |
+| Documentación | 10% | Diccionario de datos, once ADR, registros de evaluación y de errores, y este README: hecho para lo construido hasta ahora |
+| Técnicas avanzadas de ML | 50% | Arnés de evaluación, baselines y registro en MLflow: hecho. Búsqueda de hiperparámetros: hecha, pero incompleta (8 de 150 ensayos, [EVAL-009](docs/EVALUATION.md)). Modelo elegido serializado y registrado en el Model Registry: hecho ([ADR 0010](docs/adr/0010-chosen-configuration.md)). Interpretabilidad local y global: medida sobre el artefacto ([análisis](docs/analysis/interpretability.md), [ADR 0011](docs/adr/0011-interpretability-design.md)); **falta el notebook 03** |
 | Monitoreo | 30% | **Sin empezar** |
 | Reto ML 1: AutoML | +10% | Hecho sobre una búsqueda incompleta: el algoritmo es un hiperparámetro categórico entre regresión logística, Random Forest y LightGBM ([EVAL-009](docs/EVALUATION.md)) |
 | Reto ML 2: app web de monitoreo | +10% | Pendiente |
@@ -177,6 +177,13 @@ uv run python scripts/run_leakage_check.py    # controles: azar y test de permut
 uv run python scripts/run_default_models.py   # los modelos, por los dos esquemas
 ```
 
+La interpretabilidad se regenera sin MLflow, a partir del artefacto versionado y del parquet
+de referencia; escribe figuras y tablas en `reports/interpretability/`:
+
+```bash
+uv run python scripts/run_interpretability.py # la compuerta de SHAP, lo global y lo local
+```
+
 ---
 
 ## 7 · Dónde está cada cosa
@@ -193,3 +200,5 @@ uv run python scripts/run_default_models.py   # los modelos, por los dos esquema
 - [`docs/DEPENDENCIES.md`](docs/DEPENDENCIES.md): las dependencias y la procedencia de cada
   piso de versión.
 - [`docs/adr/`](docs/adr/): una entrada por decisión, con su razón.
+- [`docs/analysis/`](docs/analysis/): mediciones de registro, cada una reproducible por un
+  script; hoy, la interpretabilidad del artefacto.

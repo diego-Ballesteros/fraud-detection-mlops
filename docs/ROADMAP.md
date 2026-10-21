@@ -162,7 +162,7 @@ consecuencias:
                       │ INTERPRETABILIDAD│  │   MONITOREO    │  │  App    │
                       │ global: FI, SHAP │  │ drift: PSI/KS  │  │  web    │
                       │ PDP, ICE         │  │ desempeño en   │  │ (Reto 2)│
-                      │ local: SHAP,LIME │  │ step >= 401    │  └─────────┘
+                      │ local: SHAP      │  │ step >= 401    │  └─────────┘
                       └──────────────────┘  └────────────────┘
 ```
 
@@ -220,7 +220,7 @@ validación cruzada del AutoML respeta el orden temporal.
 | ML | scikit-learn, LightGBM, XGBoost | Candidatos del espacio de búsqueda |
 | Desbalance | imbalanced-learn | Se mide, no se asume |
 | **Optimización** | **Optuna** | El algoritmo entra como hiperparámetro (Reto 1) |
-| **Interpretabilidad** | **SHAP, LIME, sklearn** | Global: feature importance, PDP, ICE. Local: SHAP, LIME |
+| **Interpretabilidad** | **SHAP, sklearn** | Global: feature importance, PDP, ICE. Local: SHAP. LIME quedó fuera (fase 3, alcance declinado) |
 | **Monitoreo** | **Evidently** | Reportes HTML de drift y desempeño |
 | Tracking | **MLflow + DagsHub** | Registry incluido |
 | **App** | **Streamlit** | Dashboard de monitoreo (Reto 2) |
@@ -300,8 +300,8 @@ archivo ya existe hacen fallar el test.
 | models | tracking | existe |
 | models | registry | existe |
 | tracking | mlflow_setup | existe |
-| explain | global_explain | fase 3 |
-| explain | local_explain | fase 3 |
+| explain | global_explain | existe |
+| explain | local_explain | existe |
 | monitoring | drift | fase 4 |
 | monitoring | performance | fase 4 |
 | monitoring | report | fase 4 |
@@ -322,7 +322,7 @@ direcciones, con las mismas reglas.
 | `run_leakage_check.py` | La prueba del objetivo barajado, como test de permutación con el clasificador aleatorio como control; es de la fase 2 porque necesita un modelo contra el que barajar | existe |
 | `diagnose_head.py` | Qué tiene la cabeza del ranking de un modelo permutado (ERR-013) | existe |
 | `diagnose_ap.py` | De qué bloques de puntaje sale el PR-AUC de un modelo permutado (ERR-013) | existe |
-| `run_interpretability.py` | — | fase 3 |
+| `run_interpretability.py` | Explica el artefacto: la compuerta de SHAP sobre la firma, las importancias globales lado a lado, ICE y PDP, y los cuatro casos locales | existe |
 | `run_monitoring.py` | Genera el reporte HTML | fase 4 |
 
 `run_prediction.py` salió del plan: el monitoreo calcula sus propias predicciones sobre producción y la app del Reto 2 predice de forma interactiva cargando el artefacto, así que un script de predicción por lotes no tiene usuario; si la fase 4 lo necesita, se agrega entonces.
@@ -423,8 +423,9 @@ qué columnas pueden entrar al modelo.
 **local y global**, no solo un gráfico de importancias.
 
 - [ ] **Global:** feature importance (permutación y del modelo), SHAP summary, PDP, ICE
-- [ ] **Local:** SHAP waterfall y LIME sobre casos elegidos con criterio — un fraude
-      detectado, un fraude perdido, un falso positivo, un caso en el umbral
+- [ ] **Local:** SHAP waterfall sobre casos elegidos con criterio — un fraude que la regla
+      y el modelo capturan, uno que la regla no captura y el modelo sí, un falso positivo, una
+      legítima cerca del umbral (ADR 0011)
 - [ ] Contraste entre importancia por permutación y la del modelo: cuando difieren, dicen
       algo
 - [ ] **Interpretación escrita**, no solo figuras. Qué aprendió el modelo y si tiene sentido
@@ -433,6 +434,11 @@ qué columnas pueden entrar al modelo.
 
 > ✅ **Hito 3:** el modelo explicado en los dos niveles, con los nombres de features
 > propagados correctamente desde el pipeline.
+
+**Alcance declinado: LIME.** Medido contra el lock, agrega seis paquetes nuevos —lime y cinco
+transitivos: scikit-image, imageio, lazy-loader, networkx y tifffile— para un contraste
+sobre cuatro filas. La rúbrica del Curso III pide interpretación local y global, sin nombrar
+LIME, y SHAP cubre las dos (ADR 0011).
 
 ---
 
@@ -488,7 +494,7 @@ qué columnas pueden entrar al modelo.
 | Optimización de hiperparámetros | 50% | Optuna, fase 2 | 2 |
 | Registro en MLflow | 50% | DagsHub, todas las fases | 2-4 |
 | Interpretación global | 50% | FI, SHAP, PDP, ICE | 3 |
-| Interpretación local | 50% | SHAP, LIME | 3 |
+| Interpretación local | 50% | SHAP, waterfall de cuatro casos | 3 |
 | Monitoreo de desempeño | 30% | `monitoring/performance.py` | 4 |
 | Monitoreo de drift | 30% | `monitoring/drift.py` | 4 |
 | Interpretación del monitoreo | 30% | Notebook 04 + README | 4 |
