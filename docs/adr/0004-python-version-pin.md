@@ -65,3 +65,11 @@ cp311 en win_amd64 (mismo verificador).
 ["numba>=0.57"]`. Con la constraint, la resolución elige numba 0.68.0 y llvmlite 0.50.0, las
 de la tabla; sin ella (control) vuelve a 0.53.1 y 0.36.0. El mecanismo está en el ADR 0003,
 y el costo del pin de pandas que lo dispara, en el ADR 0005.
+
+---
+
+**Nota de estado (2026-10-20, fase 3):** shap entró al lock en 0.51.0, no en la 0.50.0 de la
+tabla. La tabla midió una resolución en seco sin cota sobre shap; `uv add` escribió
+`>=0.51.0`, que excluye 0.50.0 (`docs/DEPENDENCIES.md`). shap 0.51.0 tiene rueda para la
+plataforma: la instalada lleva el tag `cp311-cp311-win_amd64`. numba y llvmlite siguen en
+0.68.0 y 0.50.0 para Windows.

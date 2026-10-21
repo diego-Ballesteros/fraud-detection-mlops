@@ -33,7 +33,7 @@
 
 | Dependencia | Cota declarada | Procedencia | Justificación |
 |---|---|---|---|
-| `lightgbm` | `>=4.1` | medido | Inicio de la serie mayor en uso (ADR 0003), y subió a 4.1 por la política de ese ADR: con numpy 2.4.6, el que resuelve en los pisos, lightgbm 4.0.0 importa pero falla al ajustar sobre un DataFrame (`np.find_common_type was removed in the NumPy 2.0 release`); 4.1.0 ajusta. La verificación anterior no lo vio porque ningún test ajustaba LightGBM: lo encontró el test de `splits_on` (ERR-011, nota de estado). En la máquina de desarrollo, sin el VC++ Redistributable, `import lightgbm` solo, sin scikit-learn importado antes, falla con la versión del lock (`lib_lightgbm.dll (or one of its dependencies)`) y no con 4.0.0, que importa sola (medido en las dos). Por eso `models/estimators.py` lo importa dentro de su fábrica, y un test construye el modelo en un intérprete limpio |
+| `lightgbm` | `>=4.1` | medido | Inicio de la serie mayor en uso (ADR 0003), y subió a 4.1 por la política de ese ADR: con numpy 2.4.6, el que resuelve en los pisos, lightgbm 4.0.0 importa pero falla al ajustar sobre un DataFrame (`np.find_common_type was removed in the NumPy 2.0 release`); 4.1.0 ajusta. La verificación anterior no lo vio porque ningún test ajustaba LightGBM: lo encontró el test de `splits_on` (ERR-011, nota de estado). En la máquina de desarrollo, sin el VC++ Redistributable, `import lightgbm` solo, sin scikit-learn importado antes, falla con la versión del lock (`lib_lightgbm.dll (or one of its dependencies)`) y no con 4.0.0, que importa sola (medido en las dos). Por eso `models/estimators.py` lo importa dentro de su fábrica, y un test construye el modelo en un intérprete limpio. Desde el 2026-10-20 la máquina de desarrollo tiene el Redistributable x64 (14.51.36247, instalado por el humano), y lightgbm 4.7.0 importa solo; la importación diferida se queda, porque protege a un tercero que no lo tenga (ADR 0003, nota de estado de la fase 3) |
 | `matplotlib` | `>=3.8.4` | medido | Subió dos veces por la política del ADR 0003. Primero de 3.6 a 3.7: sin el VC++ Redistributable, `matplotlib.pyplot` 3.6.0 importado solo da `DLL load failed while importing _path`. Después a 3.8.4: con numpy 2.4.6, el que resuelve en los pisos desde que entraron mlflow y lightgbm, `matplotlib.pyplot` 3.7.0 no importa (`numpy.core.multiarray failed to import`), y con `>=3.8` el resolvedor elige 3.8.4, que importa y renderiza una figura. La nota sobre el backend inline (aclaración de alcance del encabezado) se midió en 3.7.0; el notebook no se corrió en 3.8.4 |
 | `mlflow` | `>=3.9,<4` | medido | La cota de mayor es la del ADR 0003: sin ella el resolvedor retrocede en silencio a mlflow 1.27.0. El piso subió de 3.0 a 3.9 por la política del ADR 0003 (un piso que admite una configuración que falla sube), con el punto exacto medido: con SQLAlchemy 2.1.5, la transitiva que se resuelve, mlflow 3.0.0 a 3.8.1 fallan al abrir el store sqlite (`cannot import name 'FallbackAsyncAdaptedQueuePool' from 'sqlalchemy.pool'`), y 3.9.0 pasa la suite. mlflow declara `pyarrow<26` |
 | `optuna` | `>=5.0` | medido | Inicio de la serie mayor en uso (ADR 0003); es la versión que eligió la resolución en seco del ADR 0002. En el piso, 5.0.0, un estudio con `TPESampler` corre. Entró para la búsqueda del turno 2B |
@@ -42,6 +42,7 @@
 | `pydantic` | `>=2.3` | derivado | Es el requisito que declara `pydantic-settings` 2.2.0 (ADR 0003) |
 | `pydantic-settings` | `>=2.2` | medido | Primera versión cuyo código tiene `env_ignore_empty`, que usa `config.py` (ADR 0003) |
 | `scikit-learn` | `>=1.4.2` | medido | El piso de la fase 1 era 1.2, por la API: `Pipeline.set_output` y `OneHotEncoder(sparse_output=...)` aparecen en 1.2. Subió a 1.4.2 en la fase 2, por la política del ADR 0003, con el punto exacto medido: con mlflow o lightgbm en el grafo, cualquiera de las dos, la resolución en los pisos pasa de numpy 1.26.4 a numpy 2.4.6, y con numpy 2 la 1.2.0 falla al importar (`numpy.dtype size changed, may indicate binary incompatibility`) igual que la 1.3.0 (`cannot import name 'ComplexWarning'`). 1.4.2 importa. Ninguna de las dos dependencias declara `numpy>=2`; por qué la resolución se inclina hacia numpy 2 no está determinado (`docs/ERRORS_AND_LEARNINGS.md`, ERR-011) |
+| `shap` | `>=0.51` | medido | Entró en la fase 3 por `TreeExplainer` en modo path-dependent (ADR 0011). `uv add` escribió `>=0.51.0`, la última; la cota revisada es la minor en uso, por ser serie `0.x` (ADR 0003). La resolución en seco sin cota del ADR 0003 había elegido 0.50.0 para Python 3.11; la cota que escribe la herramienta excluye 0.50.0, y el lock eligió 0.51.0. Esa versión declara `numba<0.63` y `llvmlite<0.46` solo para macOS x86_64, así que el lock se bifurca ahí (numba 0.62.1, llvmlite 0.45.1 y numpy 2.3.5); en Windows sigue numba 0.68.0, llvmlite 0.50.0 y numpy 2.4.6. La rueda instalada es `cp311-cp311-win_amd64`. Declara `numpy>=2` |
 
 ## Dependencias de desarrollo
 
@@ -62,18 +63,25 @@ No son dependencias directas: van en `[tool.uv] constraint-dependencies`.
 
 | Dependencia | Cota | Procedencia | Justificación |
 |---|---|---|---|
-| `numba` | `>=0.57` | medido | Sin ella, la resolución universal retrocede a numba 0.53.1, sin rueda cp311 para Windows; 0.57 es la primera con soporte de Python 3.11 (ADR 0003, ADR 0004) |
+| `numba` | `>=0.57` | medido | Sin ella, la resolución universal retrocede a numba 0.53.1, sin rueda cp311 para Windows; 0.57 es la primera con soporte de Python 3.11 (ADR 0003, ADR 0004). Desde la fase 3 shap la trae al grafo, y la constraint dejó de ser inerte. El 2026-10-20, en un intérprete limpio, numba 0.57.0 y 0.68.0 importan solas con el VC++ Redistributable instalado; antes de instalarlo fallaban las dos (ADR 0003, nota de estado de la fase 3) |
 
 ## Última verificación en los pisos
 
-2026-10-18, al agregar optuna. La resolución en los pisos fija 136 paquetes, entre ellos
-scikit-learn 1.4.2, mlflow 3.9.0, lightgbm 4.1.0, optuna 5.0.0, matplotlib 3.8.4, pandas
-2.2.2, numpy 2.4.6, pyarrow 16.0.0, pydantic 2.9.0, pydantic-settings 2.2.0 y SQLAlchemy
-2.1.5. Instalado ese conjunto con el procedimiento de abajo, la suite completa pasa (155
-tests), y además se comprobó lo que la suite no ejerce: LightGBM ajusta sobre un DataFrame,
-`matplotlib.pyplot` importa y renderiza una figura, y un estudio de optuna corre.
+2026-10-20, al agregar shap. La resolución en los pisos fija 140 paquetes, entre ellos shap
+0.51.0, numba 0.68.0 y llvmlite 0.50.0, junto a scikit-learn 1.4.2, pandas 2.2.2, lightgbm
+4.1.0, mlflow 3.9.0 y numpy 2.4.6. Instalado ese conjunto con el procedimiento de abajo, la
+suite completa pasa (201 tests). Esta vez la suite sí ejerce lo que la dependencia aporta:
+`TreeExplainer` sobre un LightGBM ajustado, la aditividad de sus valores con un control que
+debe fallar, y las figuras de shap.
 
-La verificación anterior, al agregar mlflow y lightgbm, había dado la suite en verde (142
+La verificación anterior fue el 2026-10-18, al agregar optuna. La resolución en los pisos
+fijó 136 paquetes, entre ellos scikit-learn 1.4.2, mlflow 3.9.0, lightgbm 4.1.0, optuna
+5.0.0, matplotlib 3.8.4, pandas 2.2.2, numpy 2.4.6, pyarrow 16.0.0, pydantic 2.9.0,
+pydantic-settings 2.2.0 y SQLAlchemy 2.1.5. Instalado ese conjunto, la suite completa pasó
+(155 tests), y además se comprobó lo que la suite no ejercía: LightGBM ajusta sobre un
+DataFrame, `matplotlib.pyplot` importa y renderiza una figura, y un estudio de optuna corre.
+
+La anterior a esa, al agregar mlflow y lightgbm, había dado la suite en verde (142
 tests) con lightgbm 4.0.0 y matplotlib 3.7.0 en los pisos, y los dos estaban rotos con
 numpy 2: ningún test ejercía esas rutas. Una suite en verde en los pisos prueba lo que la
 suite ejecuta, no la dependencia entera.

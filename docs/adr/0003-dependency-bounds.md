@@ -162,3 +162,14 @@ Redistributable, arregla esta máquina y no a un tercero que corra el proyecto e
 él. lightgbm 4.0.0, el piso, importa solo. El Arquitecto la revisó y la aceptó. Para numba
 sigue pendiente: todavía no está en el grafo. Los pisos de mlflow y de scikit-learn cambiaron
 en la misma fase, por la política de este ADR; la tabla viva es `docs/DEPENDENCIES.md`.
+
+**Nota de estado (2026-10-20, fase 3):** la condición de entorno quedó resuelta en la máquina
+de desarrollo, por instalación y no por código. Medido antes de instalar, con las versiones
+del lock y en un intérprete limpio: `import numba` 0.68.0 solo falla (el
+`_typeconv.cp311-win_amd64.pyd` no carga, "or one of its dependencies"), 0.57.0 falla en
+`llvmlite.dll`, y numba importa si antes se importó scikit-learn. `import shap` solo importaba
+igual, porque shap carga scikit-learn antes que numba (medido con 0.50.0: módulo 822 contra
+1.387 de 1.936). El Arquitecto decidió que el humano instalara el VC++ Redistributable x64, y
+quedó la versión 14.51.36247. Después, numba 0.57.0, numba 0.68.0 y lightgbm 4.7.0 importan
+solos. Para un tercero sin el Redistributable, la protección sigue siendo el orden de carga:
+la importación diferida de lightgbm, y shap, que trae scikit-learn primero.
