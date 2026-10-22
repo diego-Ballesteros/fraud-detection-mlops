@@ -35,6 +35,25 @@ def test_every_factory_builds_a_new_object(name: str) -> None:
     assert spec.preprocessor() is not spec.preprocessor()
 
 
+def test_the_ablation_preprocessor_drops_the_signature_and_nothing_else() -> None:
+    assert estimators.no_signature_preprocessor() is not estimators.no_signature_preprocessor()
+    rows = pd.DataFrame(
+        {
+            "step": [1, 2],
+            "type": ["TRANSFER", "CASH_OUT"],
+            "amount": [100.0, 50.0],
+            "oldbalanceOrg": [100.0, 80.0],
+            "oldbalanceDest": [0.0, 10.0],
+        }
+    )
+    full = set(estimators.full_preprocessor().fit(rows).get_feature_names_out())
+    ablated = set(estimators.no_signature_preprocessor().fit(rows).get_feature_names_out())
+    # Exactly the two columns that carry the signature go, the flag and the balance it is
+    # computed from; amount stays, because the flag needs both.
+    assert full - ablated == {"amount_equals_origin_balance", "oldbalanceOrg"}
+    assert ablated < full
+
+
 def test_seeds_come_from_settings_and_every_core_is_used() -> None:
     assert estimators.logistic_regression().random_state == settings.RANDOM_STATE
     forest = estimators.random_forest()

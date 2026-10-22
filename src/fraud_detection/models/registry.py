@@ -5,8 +5,9 @@ hyperparameters are written here at full precision, because the study file (``op
 is not versioned and a clean clone must rebuild the same model.
 
 The artifact is one ``Pipeline``, preprocessing and model together, built by
-``evaluation.compose``, the same function the harness fits every fold with. Notebook 03,
-the monitoring and the app load this one object; none of them rebuilds a transformation.
+``evaluation.compose``, the same function the harness fits every fold with. Notebooks 03
+and 04, the interpretability and the monitoring scripts load this one object; none of them
+rebuilds a transformation.
 It is serialized with the standard library's ``pickle``, the same format the registry copy
 uses, and loading it needs this package installed, because the Pipeline refers to its
 classes and functions by name.

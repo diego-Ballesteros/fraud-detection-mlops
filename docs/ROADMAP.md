@@ -329,6 +329,7 @@ direcciones, con las mismas reglas.
 | `run_training.py` | El AutoML: la búsqueda con el algoritmo como hiperparámetro | existe |
 | `register_model.py` | Mide la estabilidad de la configuración elegida con tres semillas, la ajusta sobre toda la referencia, la serializa y la registra en MLflow | existe |
 | `run_default_models.py` | Los baselines y las tres familias con hiperparámetros por defecto, por los dos splitters | existe |
+| `run_ablation.py` | La ablación del ADR 0007: el modelo elegido sin la firma, por el arnés temporal al lado de `full` y de la regla, y sobre producción con su propio umbral de referencia | existe |
 | `run_leakage_check.py` | La prueba del objetivo barajado, como test de permutación con el clasificador aleatorio como control; es de la fase 2 porque necesita un modelo contra el que barajar | existe |
 | `diagnose_head.py` | Qué tiene la cabeza del ranking de un modelo permutado (ERR-013) | existe |
 | `diagnose_ap.py` | De qué bloques de puntaje sale el PR-AUC de un modelo permutado (ERR-013) | existe |

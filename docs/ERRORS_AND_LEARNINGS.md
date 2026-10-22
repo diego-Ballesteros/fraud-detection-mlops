@@ -726,3 +726,25 @@ correlativo.
   comandos: el instrumento reportaba la señal de otro proceso. Y la corrida que debe fallar no es
   un trámite: fue la única que podía mostrarlo.
 - **Referencias:** ERR-009, por el arnés que leyó la ausencia de una señal como un resultado.
+
+### ERR-026 · El canario de la regla se leyó en la cifra equivocada · 2026-10-22
+
+- **Síntoma:** tres textos dijeron que una caída de la **precisión** de la regla avisaría que el
+  agente de fraude cambió: el notebook 03 ("vigila la precisión de la regla como canario: si cae,
+  el agente cambió"), el notebook 04 ("si cae, algo legítimo empezó a vaciar cuentas o el atacante
+  cambió de comportamiento") y el borrador del Model Card de la fase 5.
+- **Mecanismo:** la precisión de la regla es `TP / (TP + FP)`. Si el agente deja de vaciar cuentas,
+  bajan los verdaderos positivos y los falsos positivos siguen en 0, así que la precisión se queda
+  en 1,000: lo que cae es el **recall**. La precisión solo cae con falsos positivos, es decir, si
+  alguna legítima empieza a vaciar cuentas. "La regla deja de funcionar" se tradujo como "la regla
+  empieza a equivocarse", y son dos cifras distintas que mueven dos poblaciones distintas: el
+  recall lo mueve el atacante, la precisión, las legítimas.
+- **Cómo se detectó:** al escribir la sección 4 del Model Card, que pide decir qué significaría que
+  cada cifra se moviera. La pregunta obligó a escribir el cociente, y el cociente no daba.
+- **Corrección:** el Model Card y el markdown de los dos notebooks, sin reejecutarlos, con una nota
+  de estado en cada celda corregida.
+- **Defensa:** nivel 3: está escrito aquí, y la regla de interpretación (`docs/METHODOLOGY.md`,
+  sección 6.7) obliga a la pregunta que lo detectó.
+- **Aprendizaje:** antes de usar una cifra como alarma, se escribe qué término de su cociente la
+  mueve y qué población está detrás de ese término.
+- **Referencias:** `docs/MODEL_CARD.md`, secciones 4 y 9; notebooks 03 y 04.

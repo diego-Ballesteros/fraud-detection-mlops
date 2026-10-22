@@ -91,11 +91,38 @@ log-odds sin mirar ninguna otra feature, así que, si en datos reales la firma t
 produjeran clientes legítimos, el modelo los mandaría a la cola con el mismo empuje con que hoy
 manda los fraudes.
 
-**Cuánto caería no se puede medir con PaySim.** Haría falta lo que el simulador no tiene:
-transacciones reales etiquetadas, con transferencias legítimas por el saldo completo. Lo más
-cercano que el proyecto declaró, la ablación sin la firma del ADR 0007 (la configuración
-`no_signature`), **no se corrió**: cuánto del desempeño es la firma, en estos mismos datos, no
-está medido.
+**Cuánto del desempeño es la firma, medido: casi todo.** La ablación del ADR 0007 reentrena el
+mismo modelo —los hiperparámetros y la semilla del ensayo 5— sin la bandera ni `oldbalanceOrg`,
+por el mismo arnés y los mismos folds (EVAL-013):
+
+| Sobre los 5 folds temporales | Recall con precisión ≥ 0,99 | PR-AUC | Brier |
+|---|---|---|---|
+| El modelo completo (`full`) | 0,9970 ± 0,0036 | 0,9978 ± 0,0028 | 0,000011 ± 0,000005 |
+| La regla | 0,9788 ± 0,0101 | 0,9788 ± 0,0101 | 0,000015 ± 0,000008 |
+| **Sin la firma (`no_signature`)** | **0 en los 5 folds** | 0,0737 ± 0,0354 | 0,0049 ± 0,0011 |
+
+- **Sin la firma, el modelo no puede operar.** Ningún umbral alcanza precisión 0,99 en ningún
+  fold, y tampoco 0,95, 0,90, 0,80 ni 0,50. No lo alcanza ni *in-sample*, sobre las mismas filas
+  con que se ajustó, así que no tiene punto de operación que llevar a producción: su recall ahí
+  es 0 por definición.
+- **Queda señal, pero no alcanza.** Su PR-AUC es de 69 a 169 veces la prevalencia de cada fold,
+  muy por encima del máximo del test de permutación (0,0112, EVAL-004): ordena el fraude por encima
+  de lo legítimo en promedio. Pero la cabeza de su ranking está mezclada: lo mejor que logra un
+  umbral es atrapar cerca de la mitad de los fraudes revisando de 4 a 13 legítimas por cada uno.
+  Su Brier es de 5,6 a 9,3 veces el de un predictor constante: el puntaje inflado por
+  `scale_pos_weight` le cuesta más de lo que el ranking le da.
+- **Lo que esto vuelve evidencia.** La sección deja de ser un razonamiento sobre la firma: con la
+  información de la firma fuera, no queda un detector, queda un ranking que no sirve para una cola
+  de revisión. La ablación se lleva también parte de lo que el modelo atrapa fuera de la regla: en
+  el caso b y en los 57 fraudes de exactamente 10.000.000, lo que los separa de las 2.900
+  legítimas con el mismo monto es el saldo de origen (`docs/analysis/interpretability.md`, nota de
+  estado), y `no_signature` no lo tiene.
+
+**Lo que la ablación no mide.** Quita la bandera y el saldo de origen juntos, así que no separa
+una del otro. Usa hiperparámetros elegidos con la firma, así que un modelo ajustado sin ella podría
+rendir algo mejor. Y no es un experimento con datos reales: allí la firma no desaparecería, dejaría
+de ser exclusiva del fraude, y para medir eso hace falta lo que el simulador no tiene,
+transacciones reales etiquetadas con transferencias legítimas por el saldo completo.
 
 Otros usos fuera de alcance:
 
@@ -368,8 +395,10 @@ descartar aquí.
   la validación temporal (EVAL-009, EVAL-010). Una ventana está debajo cuando su recall es
   estrictamente menor, comparado en enteros.
 - **2 ventanas consecutivas debajo son una alerta; 3 son degradación.** Una ventana sola es ruido.
-- La degradación es el disparador del reentrenamiento; la alerta es el aviso previo. Esta asignación
-  la hace este documento: el ADR 0012 define los dos niveles, no qué se hace con cada uno.
+- **La degradación dispara el reentrenamiento; la alerta es un aviso que se investiga**, y el
+  drift no dispara nada (ADR 0013). La razón está medida: con un modelo estable, en 14 días una
+  ventana sola caería debajo por azar con probabilidad 0,931, una alerta con 0,302 y una
+  degradación con 0,054. La ventana 2 de producción cayó debajo sin ningún drift propio.
 
 **Cómo leerlo.** En producción solo la ventana 2 cayó debajo (248 de 250): sin alerta. A esta
 resolución el criterio es ruidoso: si el recall verdadero fuera 0,9970 todos los días, una ventana

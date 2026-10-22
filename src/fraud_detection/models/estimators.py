@@ -42,7 +42,11 @@ from fraud_detection.models.baseline import SignatureRule
 from fraud_detection.models.evaluation import EstimatorFactory
 
 EVALUATED_CONFIGURATION: Final[str] = "full"
-"""The feature configuration of every run in phase 2A; ``no_signature`` comes later."""
+"""The feature configuration of every run in phase 2A. ``no_signature``, the ablation of
+ADR 0007, runs only in ``scripts/run_ablation.py``, which tags its own runs."""
+
+ABLATION_CONFIGURATION: Final[str] = "no_signature"
+"""The configuration of ADR 0007's ablation: no ``oldbalanceOrg`` and no signature flag."""
 
 ALL_CORES: Final[int] = -1
 
@@ -50,6 +54,11 @@ ALL_CORES: Final[int] = -1
 def full_preprocessor() -> Pipeline:
     """The ``full`` preprocessing Pipeline, new and unfitted."""
     return build_preprocessor(EVALUATED_CONFIGURATION)
+
+
+def no_signature_preprocessor() -> Pipeline:
+    """The ``no_signature`` preprocessing Pipeline of the ablation, new and unfitted."""
+    return build_preprocessor(ABLATION_CONFIGURATION)
 
 
 def raw_rows() -> FunctionTransformer:
