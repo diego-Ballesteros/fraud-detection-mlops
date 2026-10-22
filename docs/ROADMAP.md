@@ -323,7 +323,7 @@ direcciones, con las mismas reglas.
 | `run_leakage_check.py` | La prueba del objetivo barajado, como test de permutación con el clasificador aleatorio como control; es de la fase 2 porque necesita un modelo contra el que barajar | existe |
 | `diagnose_head.py` | Qué tiene la cabeza del ranking de un modelo permutado (ERR-013) | existe |
 | `diagnose_ap.py` | De qué bloques de puntaje sale el PR-AUC de un modelo permutado (ERR-013) | existe |
-| `run_interpretability.py` | Explica el artefacto: la compuerta de SHAP sobre la firma, las importancias globales lado a lado, ICE y PDP, y los cuatro casos locales | existe |
+| `run_interpretability.py` | Explica el artefacto: la compuerta de SHAP sobre la firma, las importancias globales lado a lado, ICE y PDP —`amount` también sobre su rango completo—, los cuatro casos locales, y adjunta figuras y tablas a la versión 1 del Model Registry | existe |
 | `run_monitoring.py` | Mide producción: el desempeño por ventanas de 24 steps al umbral fijo junto a la regla, el criterio de degradación, el drift por PSI y KS, el reporte HTML de Evidently y su contraste con los instrumentos propios | existe |
 
 `run_prediction.py` salió del plan: el monitoreo calcula sus propias predicciones sobre producción y la app del Reto 2 predice de forma interactiva cargando el artefacto, así que un script de predicción por lotes no tiene usuario. La fase 4 no lo necesitó: `run_monitoring.py` puntúa producción cargando el artefacto.

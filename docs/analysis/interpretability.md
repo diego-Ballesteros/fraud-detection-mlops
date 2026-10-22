@@ -259,3 +259,29 @@ cada corrida y no son costos de referencia.
 **Nota de estado (2026-10-21):** la generalización que esta medición no cubría se midió en la
 fase 4, con el mismo artefacto y el mismo umbral: sobre producción, recall 0,9976 y precisión
 0,9997 (`docs/analysis/monitoring.md`, EVAL-011). Las cifras de este documento no cambian.
+
+**Nota de estado (2026-10-21, notebook 03):** una tercera corrida completa del script dio las
+mismas cifras de las secciones 1 a 4; la permutación tardó 419,2 s. Una afirmación dejó de ser
+cierta y hay tres mediciones nuevas:
+
+- **"62 de los 92 tienen un monto mayor" es falso** (secciones 3 y 6). Los 62 caen **fuera** de la
+  grilla de `amount`, que va de 454,22 a 1.621.796,86: **58 por encima y 4 por debajo**. Los 4 de
+  abajo tienen `amount` 0, el caso degenerado que el ADR 0006 sacó de la firma. La tabla de la
+  sección 3 decía "fuera de la grilla" y era correcta; el texto la leyó como "por encima" (ERR-024).
+  Medido con `global_explain.grid_side`, que separa los dos lados.
+- **El modelo no corta sobre `amount` por encima de 2.812.983,54.** De sus 1.227 nodos sobre
+  `amount`, ese es el de umbral más alto en moneda (`global_explain.raw_split_thresholds`), y 53
+  quedan por encima del último punto de la grilla. Por encima de ese valor, la salida del modelo no
+  puede depender de `amount`. La lectura del caso b de la sección 4, "un monto de exactamente
+  10.000.000 (+15,43)", describe la fila y no lo que el modelo distingue: para el modelo, 10.000.000
+  es lo mismo que cualquier monto por encima de 2.812.983,54.
+- **`amount` sobre su rango completo:** figura `ice_amount_full_range.png`, con una grilla de 60
+  puntos geométricos entre el menor monto positivo y 92.445.516,64, más el 0
+  (`global_explain.log_grid`; ADR 0011, nota de estado). El PDP de los fraudes fuera de la regla va
+  de −10,05 a +8,98 log-odds y salta en el tramo del último corte; el de las legítimas, de −9,63 a
+  −8,23. La figura de cuantiles queda como estaba: las dos conviven, y la razón está en el notebook
+  03, sección 6.
+- **Las figuras y tablas viajan con el modelo:** el paso 6 del script adjunta los 11 archivos de
+  `reports/interpretability/` a la corrida `e1fb3e9b12ed4dfc9a025a751eb9ff04`, la que registró
+  `fraud-detection-pipeline` versión 1, bajo `interpretability/`, después de comprobar que la
+  versión se registró con el sha256 de este artefacto.

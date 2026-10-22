@@ -268,6 +268,15 @@ correlativo.
   ausencia de evidencia de fallo se lee igual que la evidencia de éxito, salvo que haya un
   control que pruebe que el instrumento corrió.
 - **Referencias:** ERR-007, por la otra vez que un fallo se manifestó solo al ejecutar.
+- **Nota de estado (2026-10-21):** la instancia relacionada se repitió tres veces en el turno de los
+  notebooks 02 y 03, todas en código de Python pasado en línea a la shell; la tercera, al generar
+  el control positivo del grep de rutas absolutas, terminó en un `SyntaxError` antes de escribir
+  nada. Las dos primeras, con el heredoc entre comillas simples. Un `"\\n"` dentro de un f-string llegó al archivo como un salto de línea real, y
+  ruff lo detectó antes de ejecutar nada. En la otra, el texto que un reemplazo buscaba contenía
+  `\\n`, dejó de coincidir y la aserción del conteo de coincidencias detuvo el reemplazo antes de
+  escribir. Dónde se convierte la secuencia no está determinado: un heredoc entre comillas simples
+  no la interpreta. La defensa que funcionó fue editar con la herramienta de edición, no por la
+  shell, todo texto que lleve barras invertidas.
 
 ### ERR-010 · El ejecutor de notebooks corrompió los acentos y todas las verificaciones dieron verde · 2026-10-18
 
@@ -538,6 +547,12 @@ correlativo.
 - **Aprendizaje:** que un trabajo largo sea reanudable no es un lujo: es lo que convirtió un
   corte en un resultado parcial en vez de en una pérdida.
 - **Referencias:** EVAL-009, ADR 0010.
+- **Nota de estado (2026-10-21):** se repitió en el turno de los notebooks 02 y 03. El entorno
+  detuvo la ejecución final de los dos, en segundo plano, durante el notebook 02. `nbclient
+  --inplace` escribe el archivo solo al terminar, así que el corte no dejó una ejecución a medias:
+  dejó los dos notebooks sin salidas, como estaban antes de ejecutarse. Una ejecución que corre más
+  de lo que permite el primer plano necesita la terminal propia o la variable de entorno de la
+  defensa de arriba.
 
 ### ERR-018 · Un medidor de memoria leyó una llamada fallida como "cero" · 2026-10-20
 
@@ -663,3 +678,28 @@ correlativo.
   fallar por la máquina y no por el proyecto; el código que lo respalda se puede llamar sin el
   lanzador.
 - **Referencias:** `Taskfile.yml`, ERR-010.
+
+### ERR-024 · Un conteo de dos lados se leyó como de un lado · 2026-10-21
+
+- **Síntoma:** `docs/analysis/interpretability.md` afirma, en las secciones 3 y 6, que "62 de los
+  92" fraudes que la regla no cubre "tienen un monto mayor" que el último punto de la grilla del ICE
+  de `amount`, 1.621.796,86. El prompt del notebook 03 repitió la cifra como hecho: "62 de los 92
+  fraudes fuera de la regla están por encima". Medido: 58 están por encima y 4 por debajo.
+- **Mecanismo:** `global_explain.outside_grid` devuelve `valor < primer punto` **o** `valor >
+  último punto`, y el script lo imprimía como "rows whose own amount lies outside the grid". El
+  documento lo escribió como "mayor". En `amount` la grilla empieza en el cuantil 0,01, 454,22, y
+  los 4 fraudes con `amount` 0 —el caso degenerado que el ADR 0006 sacó de la firma— caen por
+  debajo. En `oldbalanceOrg` la grilla empieza en 0, nada puede caer por debajo, y la misma lectura
+  era correcta (27 de 92): la columna cambió el significado del conteo, y el texto no.
+- **Cómo se detectó:** al medir para la figura de rango completo, separando el conteo por lado
+  antes de escribir la limitación en el notebook 03.
+- **Corrección:** `global_explain.grid_side` dice de qué lado cae cada fila, y su test construye un
+  caso con una fila de cada lado, donde "fuera" no es "encima". El script imprime la tabla por lado
+  y grupo, y el documento lleva una nota de estado.
+- **Defensa:** nivel 2 para la función: su test distingue los dos lados. Nivel 3 para la prosa que
+  resume un conteo: está escrito aquí.
+- **Aprendizaje:** el nombre de un conteo es parte de la medición. "Fuera" y "encima" son lo mismo
+  solo cuando la grilla empieza en el mínimo de la columna. Y otra vez la lección de ERR-022: una
+  cifra del contexto de un prompt se mide dentro del turno.
+- **Referencias:** `docs/analysis/interpretability.md`, ADR 0006, ADR 0011 (nota de estado),
+  ERR-022.

@@ -1,5 +1,6 @@
 """Tests of fraud_detection.explain.global_explain, with expected values computed by hand."""
 
+import copy
 from functools import partial
 
 import matplotlib.pyplot as plt
@@ -11,7 +12,12 @@ from sklearn.pipeline import Pipeline
 from fraud_detection.data.schema import TARGET_COLUMN
 from fraud_detection.explain import global_explain
 from fraud_detection.explain.global_explain import (
+    ABOVE_GRID,
+    BELOW_GRID,
+    GRID_SIDES,
+    INSIDE_GRID,
     LEGITIMATE,
+    MONEY_BRANCH,
     OTHER_FRAUD,
     RULE_FRAUD,
     SIGNATURE_FEATURES,
@@ -19,7 +25,9 @@ from fraud_detection.explain.global_explain import (
     compare_rankings,
     decision_metric,
     explanation_sample,
+    grid_side,
     ice_curves,
+    log_grid,
     mean_abs_shap,
     model_features,
     model_importance,
@@ -28,6 +36,7 @@ from fraud_detection.explain.global_explain import (
     plot_beeswarm,
     plot_ice,
     raw_grid,
+    raw_split_thresholds,
     rule_groups,
     shap_values,
     signature_gate,
@@ -243,6 +252,51 @@ def test_trees_splitting_on_agrees_with_the_split_count(fitted: Pipeline) -> Non
     assert all(trees_splitting_on(fitted, feature).empty for feature in unused)
 
 
+def _money_branch(pipeline: Pipeline) -> Pipeline:
+    columns = pipeline[:-1].named_steps["preprocess"].named_steps["columns"]
+    return columns.named_transformers_[MONEY_BRANCH]
+
+
+def test_raw_split_thresholds_map_back_to_the_booster_thresholds(fitted: Pipeline) -> None:
+    raw = raw_split_thresholds(fitted, "amount")
+    booster = np.sort(trees_splitting_on(fitted, "amount")["threshold"].to_numpy(dtype=float))
+    # Precondition: the synthetic model splits on amount, or there would be nothing to map.
+    assert len(raw) == len(booster) > 0
+    assert (np.diff(raw) >= 0).all()
+    # Round trip: the money branch sends each raw value back to its booster threshold.
+    money = _money_branch(fitted)
+    frame = pd.DataFrame(0.0, index=range(len(raw)), columns=list(money.feature_names_in_))
+    frame["amount"] = raw
+    np.testing.assert_allclose(money.transform(frame)["amount"], booster, rtol=0, atol=1e-9)
+
+
+def test_above_the_largest_raw_threshold_the_output_does_not_depend_on_the_column(
+    fitted: Pipeline,
+) -> None:
+    largest = raw_split_thresholds(fitted, "amount")[-1]
+    rows = synthetic_frame().drop(columns=[TARGET_COLUMN]).head(20)
+    # The balance stays away from every amount tried, so the derived flag stays off.
+    rows = rows.assign(oldbalanceOrg=largest * 100)
+    grid = np.array([largest * 1.01, largest * 2, largest * 10])
+    curves = ice_curves(fitted, rows, "amount", grid)
+    assert (curves.nunique(axis=1) == 1).all()
+    # Control: across the largest threshold the output does move for some row.
+    across = ice_curves(fitted, rows, "amount", np.array([largest * 0.5, largest * 1.01]))
+    assert (across.nunique(axis=1) > 1).any()
+
+
+def test_raw_split_thresholds_refuse_a_column_outside_the_money_branch(fitted: Pipeline) -> None:
+    with pytest.raises(ValueError, match="not a money column"):
+        raw_split_thresholds(fitted, "hour_sin")
+
+
+def test_raw_split_thresholds_refuse_a_money_branch_it_cannot_invert(fitted: Pipeline) -> None:
+    changed = copy.deepcopy(fitted)
+    _money_branch(changed).named_steps["log1p"].func = np.sqrt
+    with pytest.raises(ValueError, match="log1p_non_negative"):
+        raw_split_thresholds(changed, "amount")
+
+
 def test_compare_rankings_by_hand() -> None:
     table = compare_rankings(
         {"m1": pd.Series({"a": 3.0, "b": 1.0, "c": 2.0}), "m2": pd.Series({"a": 1, "b": 5, "c": 1})}
@@ -277,6 +331,40 @@ def test_outside_grid_by_hand() -> None:
         False,
         True,
     ]
+
+
+def test_log_grid_by_hand() -> None:
+    # Geometric from the smallest positive to the largest, both exact, and 0 added.
+    assert log_grid(pd.Series([0.0, 1.0, 10.0, 100.0]), points=3).tolist() == [
+        0.0,
+        1.0,
+        10.0,
+        100.0,
+    ]
+    # Without a zero in the column, no zero in the grid.
+    grid = log_grid(pd.Series([2.0, 8.0, 5.0]), points=3)
+    np.testing.assert_allclose(grid, [2.0, 4.0, 8.0])
+    assert (grid[0], grid[-1]) == (2.0, 8.0)
+
+
+def test_log_grid_refuses_what_has_no_log_scale() -> None:
+    with pytest.raises(ValueError, match="non-negative"):
+        log_grid(pd.Series([-1.0, 5.0]))
+    with pytest.raises(ValueError, match="positive"):
+        log_grid(pd.Series([0.0, 0.0]))
+
+
+def test_grid_side_by_hand() -> None:
+    values = pd.Series([-1.0, 0.0, 5.0, 10.0, 11.0], index=[3, 4, 5, 6, 7])
+    grid = np.array([0.0, 4.0, 10.0])
+    sides = grid_side(values, grid)
+    assert sides.tolist() == [BELOW_GRID, INSIDE_GRID, INSIDE_GRID, INSIDE_GRID, ABOVE_GRID]
+    assert sides.index.equals(values.index)
+    assert list(sides.cat.categories) == list(GRID_SIDES)
+    # Both sides together are exactly what outside_grid counts.
+    assert (sides != INSIDE_GRID).tolist() == outside_grid(values, grid).tolist()
+    # A count of rows outside is not a count of rows above: here one is below, one above.
+    assert sides.value_counts()[[BELOW_GRID, ABOVE_GRID]].tolist() == [1, 1]
 
 
 def test_ice_curves_match_the_artifact_on_each_modified_row(fitted: Pipeline) -> None:
