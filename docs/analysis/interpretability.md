@@ -275,6 +275,15 @@ cierta y hay tres mediciones nuevas:
   puede depender de `amount`. La lectura del caso b de la sección 4, "un monto de exactamente
   10.000.000 (+15,43)", describe la fila y no lo que el modelo distingue: para el modelo, 10.000.000
   es lo mismo que cualquier monto por encima de 2.812.983,54.
+- **La inferencia del tope de 10.000.000 queda descartada** (sección 4, caso b). En referencia hay
+  3.014 transacciones de exactamente 10.000.000: 114 fraudes y **2.900 legítimas**, todas
+  `TRANSFER`, y el monto de referencia llega a 92.445.516,64. El modelo marca los 114 fraudes y
+  ninguna de las 2.900; lo que los separa es el saldo de origen, mayor que el monto en los 57
+  fraudes que la regla no cubre y en ninguna de las legítimas. A escala de toda la cola: por encima
+  del último corte hay 22.844 transacciones, 658 fraudes, y el modelo marca los 658 y una legítima.
+  Lo que el modelo aprendió es "monto grande en relación con el saldo de la cuenta", no una cifra.
+  Estas cuentas las reproduce el notebook 03 (secciones 5 y 6) con `profiling.rule_outcome`; el
+  script no las calcula.
 - **`amount` sobre su rango completo:** figura `ice_amount_full_range.png`, con una grilla de 60
   puntos geométricos entre el menor monto positivo y 92.445.516,64, más el 0
   (`global_explain.log_grid`; ADR 0011, nota de estado). El PDP de los fraudes fuera de la regla va
