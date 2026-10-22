@@ -253,3 +253,44 @@ cada corrida y no son costos de referencia.
 - **El ICE de `amount`** no cubre la región de los 10.000.000, donde están 62 de los 92 fraudes
   que la regla no ve.
 - **Los 11 fraudes que la regla no cubre y el modelo tampoco marca** no se analizaron.
+
+---
+
+**Nota de estado (2026-10-21):** la generalización que esta medición no cubría se midió en la
+fase 4, con el mismo artefacto y el mismo umbral: sobre producción, recall 0,9976 y precisión
+0,9997 (`docs/analysis/monitoring.md`, EVAL-011). Las cifras de este documento no cambian.
+
+**Nota de estado (2026-10-21, notebook 03):** una tercera corrida completa del script dio las
+mismas cifras de las secciones 1 a 4; la permutación tardó 419,2 s. Una afirmación dejó de ser
+cierta y hay tres mediciones nuevas:
+
+- **"62 de los 92 tienen un monto mayor" es falso** (secciones 3 y 6). Los 62 caen **fuera** de la
+  grilla de `amount`, que va de 454,22 a 1.621.796,86: **58 por encima y 4 por debajo**. Los 4 de
+  abajo tienen `amount` 0, el caso degenerado que el ADR 0006 sacó de la firma. La tabla de la
+  sección 3 decía "fuera de la grilla" y era correcta; el texto la leyó como "por encima" (ERR-024).
+  Medido con `global_explain.grid_side`, que separa los dos lados.
+- **El modelo no corta sobre `amount` por encima de 2.812.983,54.** De sus 1.227 nodos sobre
+  `amount`, ese es el de umbral más alto en moneda (`global_explain.raw_split_thresholds`), y 53
+  quedan por encima del último punto de la grilla. Por encima de ese valor, la salida del modelo no
+  puede depender de `amount`. La lectura del caso b de la sección 4, "un monto de exactamente
+  10.000.000 (+15,43)", describe la fila y no lo que el modelo distingue: para el modelo, 10.000.000
+  es lo mismo que cualquier monto por encima de 2.812.983,54.
+- **La inferencia del tope de 10.000.000 queda descartada** (sección 4, caso b). En referencia hay
+  3.014 transacciones de exactamente 10.000.000: 114 fraudes y **2.900 legítimas**, todas
+  `TRANSFER`, y el monto de referencia llega a 92.445.516,64. El modelo marca los 114 fraudes y
+  ninguna de las 2.900; lo que los separa es el saldo de origen, mayor que el monto en los 57
+  fraudes que la regla no cubre y en ninguna de las legítimas. A escala de toda la cola: por encima
+  del último corte hay 22.844 transacciones, 658 fraudes, y el modelo marca los 658 y una legítima.
+  Lo que el modelo aprendió es "monto grande en relación con el saldo de la cuenta", no una cifra.
+  Estas cuentas las reproduce el notebook 03 (secciones 5 y 6) con `profiling.rule_outcome`; el
+  script no las calcula.
+- **`amount` sobre su rango completo:** figura `ice_amount_full_range.png`, con una grilla de 60
+  puntos geométricos entre el menor monto positivo y 92.445.516,64, más el 0
+  (`global_explain.log_grid`; ADR 0011, nota de estado). El PDP de los fraudes fuera de la regla va
+  de −10,05 a +8,98 log-odds y salta en el tramo del último corte; el de las legítimas, de −9,63 a
+  −8,23. La figura de cuantiles queda como estaba: las dos conviven, y la razón está en el notebook
+  03, sección 6.
+- **Las figuras y tablas viajan con el modelo:** el paso 6 del script adjunta los 11 archivos de
+  `reports/interpretability/` a la corrida `e1fb3e9b12ed4dfc9a025a751eb9ff04`, la que registró
+  `fraud-detection-pipeline` versión 1, bajo `interpretability/`, después de comprobar que la
+  versión se registró con el sha256 de este artefacto.

@@ -39,6 +39,10 @@ READS_PRODUCTION = re.compile(
     """,
     re.VERBOSE,
 )
+# The monitoring notebook is the only one that may read production, and only in a code cell
+# that says why (ADR 0012). Any other mention, in any cell of any notebook, is a violation.
+PRODUCTION_READER = "04_monitoring.ipynb"
+PRODUCTION_READ_MARKER = "Lectura de producción autorizada"
 
 
 def _files_under(roots: list[Path]) -> list[Path]:
@@ -127,11 +131,55 @@ def test_no_notebook_reads_production(tmp_path: Path) -> None:
     # Positive and negative controls, as in the other two tests.
     assert [text for text in violations if not READS_PRODUCTION.search(text)] == []
     assert [text for text in sanctioned if READS_PRODUCTION.search(text)] == []
-    notebook = json.dumps({"cells": [{"source": [f"{text}\n" for text in violations]}]}, indent=1)
-    (tmp_path / "bad.ipynb").write_text(notebook, encoding="utf-8")
-    assert len(_violations(READS_PRODUCTION, _files_under([tmp_path]))) == len(violations)
+    marker = f"# {PRODUCTION_READ_MARKER}: fase 4\n"
+    read = "frame = loader.read_production()\n"
+    bad = _notebook(tmp_path / "bad.ipynb", [_code(f"{text}\n") for text in violations])
+    assert _production_reads(bad) == ([f"bad.ipynb, cell {i}" for i in range(3)], 0)
+    # In the monitoring notebook a marked code cell is authorized; an unmarked code cell and a
+    # markdown cell are not, and the marker authorizes nothing in any other notebook.
+    reader = _notebook(
+        tmp_path / PRODUCTION_READER,
+        [_code(marker, read), _code(read), {"cell_type": "markdown", "source": [marker, read]}],
+    )
+    assert _production_reads(reader) == (
+        [f"{PRODUCTION_READER}, cell 1", f"{PRODUCTION_READER}, cell 2"],
+        1,
+    )
+    other = _notebook(tmp_path / "05_other.ipynb", [_code(marker, read)])
+    assert _production_reads(other) == (["05_other.ipynb, cell 0"], 0)
 
     notebooks = _files_under([NOTEBOOKS_DIR])
     assert notebooks, f"No notebook under {NOTEBOOKS_DIR}: the scan would pass vacuously"
-    offenders = _violations(READS_PRODUCTION, notebooks)
+    found = {path.name: _production_reads(path) for path in notebooks}
+    offenders = [cell for cells, _ in found.values() for cell in cells]
     assert not offenders, f"A notebook reads the production period: {offenders}"
+    # Control: when the monitoring notebook exists, the scan sees its authorized read.
+    if PRODUCTION_READER in found:
+        assert found[PRODUCTION_READER][1] >= 1, "The scan does not see the authorized read"
+
+
+def _code(*lines: str) -> dict[str, object]:
+    return {"cell_type": "code", "source": list(lines), "outputs": []}
+
+
+def _notebook(path: Path, cells: list[dict[str, object]]) -> Path:
+    path.write_text(json.dumps({"cells": cells}, indent=1), encoding="utf-8")
+    return path
+
+
+def _production_reads(path: Path) -> tuple[list[str], int]:
+    """Cells that mention the production period without authorization, and authorized reads.
+
+    A whole cell is scanned, source and outputs, so a path printed in an output counts too.
+    """
+    offenders, authorized = [], 0
+    for index, cell in enumerate(json.loads(path.read_text(encoding="utf-8"))["cells"]):
+        if not READS_PRODUCTION.search(json.dumps(cell, ensure_ascii=False)):
+            continue
+        source = "".join(cell.get("source", []))
+        is_marked_code = cell.get("cell_type") == "code" and PRODUCTION_READ_MARKER in source
+        if path.name == PRODUCTION_READER and is_marked_code:
+            authorized += 1
+        else:
+            offenders.append(f"{path.name}, cell {index}")
+    return offenders, authorized

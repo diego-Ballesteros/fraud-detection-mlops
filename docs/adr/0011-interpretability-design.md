@@ -139,3 +139,29 @@ del Ejecutor.
 **Nota del Ejecutor sobre la procedencia (2026-10-20):** en el turno en que se decidió el
 punto 7, el Ejecutor había listado pillow entre los paquetes que lime arrastra. Medido contra
 el lock, pillow ya estaba, porque lo trae matplotlib. Las seis del punto 7 son las nuevas.
+
+---
+
+**Nota de estado (2026-10-21, notebook 03), decisiones del humano:** el Ejecutor presentó las
+opciones con lo medido, y el humano eligió.
+
+- **Una segunda grilla para el ICE de `amount`, sobre su rango completo.** La grilla del punto 6
+  termina en el cuantil 0,99, 1.621.796,86, y 58 de los 92 fraudes que la regla no cubre están por
+  encima (`docs/analysis/interpretability.md`, nota de estado). Se eligió una grilla nueva de 60
+  puntos geométricos entre el menor monto positivo de referencia y el mayor, más el 0
+  (`global_explain.log_grid`), y una función que traduce los cortes del modelo a moneda
+  (`global_explain.raw_split_thresholds`), para escribir dónde deja de depender de `amount` en vez
+  de leerlo de la figura. La grilla de cuantiles no se reemplaza: las dos figuras conviven.
+  **Alternativas descartadas:** extender los 50 cuantiles con puntos geométricos por encima del
+  cuantil 0,99; y `raw_grid` con cuantiles de 0 a 1, que no pone ningún punto entre unos 1,2
+  millones y el máximo de 92,4 millones.
+- **Las figuras y tablas de la interpretabilidad son artefactos de la versión 1 del Model
+  Registry**, en la corrida que la registró, bajo `interpretability/`, para que la versión cargue
+  su propia explicación. Las adjunta `registry.log_version_artifacts`, que antes de subir nada
+  comprueba que la versión se registró con el sha256 del artefacto explicado, desde un paso final
+  de `scripts/run_interpretability.py`, solo contra el servidor de `.env`: un store local no tiene
+  versión 1, así que no hay respaldo local. El notebook 03 no escribe en MLflow. **Alternativas
+  descartadas:** una corrida nueva con los artefactos y una etiqueta en la versión que la apunte,
+  que deja intacta la corrida de registro pero no hace que la versión contenga su explicación; y
+  subirlas desde el notebook 03, con lo que cada ejecución escribiría en MLflow y exigiría red y
+  credenciales.

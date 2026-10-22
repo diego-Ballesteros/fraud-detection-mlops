@@ -15,10 +15,15 @@ Registration builds no MLflow client at import, and refuses to run unless the ac
 tracking URI is the one ``tracking.mlflow_setup.configure_mlflow`` set: a client built
 before configuration resolves against the local store (the "Model Version not found" of
 the previous project).
+
+A registered version points at the run that logged it. ``log_version_artifacts`` attaches
+files to that run, under their own folder, so the version carries its own explanation: the
+interpretability figures of phase 3 travel with version 1. It refuses unless the version was
+registered from the very artifact the files describe, by its sha256.
 """
 
 import pickle
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Final
@@ -51,6 +56,14 @@ CHOSEN_PARAMS: Final[Mapping[str, Any]] = MappingProxyType(
 
 ARTIFACT_PATH: Final[Path] = settings.ROOT_DIR / "artifacts" / "fraud_detection_pipeline.pkl"
 REGISTERED_MODEL_NAME: Final[str] = "fraud-detection-pipeline"
+ARTIFACT_VERSION: Final[str] = "1"
+"""The registry version of ``ARTIFACT_PATH`` (ADR 0010)."""
+
+ARTIFACT_SHA256_TAG: Final[str] = "artifact_sha256"
+"""Version tag ``scripts/register_model.py`` writes: the sha256 of the registered artifact."""
+
+INTERPRETABILITY_FOLDER: Final[str] = "interpretability"
+"""Folder of the version's run where its interpretability figures and tables go."""
 MODEL_INPUT_COLUMNS: Final[tuple[str, ...]] = (
     "step",
     "type",
@@ -165,3 +178,63 @@ def register_pipeline(
         for name, value in tags.items():
             client.set_model_version_tag(REGISTERED_MODEL_NAME, version, name, value)
         return str(run.info.run_id), version
+
+
+def log_version_artifacts(
+    paths: Sequence[Path],
+    *,
+    target: TrackingTarget,
+    version: str,
+    artifact_sha256: str,
+    folder: str = INTERPRETABILITY_FOLDER,
+    tags: Mapping[str, str] | None = None,
+) -> str:
+    """Attach files to the run that registered one version, under one folder of that run.
+
+    Every check runs before the first upload, so a refusal leaves the run as it was. The
+    run's parameters, metrics and logged model are not touched; only files under ``folder``
+    are added, and a file with the same name there is replaced.
+
+    Args:
+        paths: Files to attach, at least one.
+        target: What ``configure_mlflow`` returned; proves MLflow was configured.
+        version: The registered version of ``REGISTERED_MODEL_NAME``.
+        artifact_sha256: The sha256 of the artifact the files describe; it must equal the
+            version's ``ARTIFACT_SHA256_TAG``.
+        folder: Folder of the run that receives the files.
+        tags: Tags to set on the version once the files are attached.
+
+    Returns:
+        The ID of the run the files went to.
+
+    Raises:
+        RuntimeError: If the active tracking URI is not ``target``'s.
+        ValueError: If ``paths`` is empty, or the version was registered from another
+            artifact or without the sha256 tag.
+        FileNotFoundError: If a path is not a file.
+    """
+    active = redact_uri(mlflow.get_tracking_uri())
+    if active != target.tracking_uri:
+        raise RuntimeError(
+            f"MLflow points at {active}, not at the configured {target.tracking_uri}: "
+            "call configure_mlflow before attaching files"
+        )
+    # An empty list would attach nothing and still report success (ERR-008).
+    if not paths:
+        raise ValueError("No file to attach")
+    missing = [path for path in paths if not path.is_file()]
+    if missing:
+        raise FileNotFoundError(f"Not files: {missing}")
+    client = mlflow.MlflowClient()
+    model_version = client.get_model_version(REGISTERED_MODEL_NAME, version)
+    registered = model_version.tags.get(ARTIFACT_SHA256_TAG)
+    if registered != artifact_sha256:
+        raise ValueError(
+            f"Version {version} was registered from artifact {registered}, "
+            f"not from {artifact_sha256}: the files would describe another model"
+        )
+    for path in paths:
+        client.log_artifact(model_version.run_id, str(path), artifact_path=folder)
+    for name, value in (tags or {}).items():
+        client.set_model_version_tag(REGISTERED_MODEL_NAME, version, name, value)
+    return str(model_version.run_id)

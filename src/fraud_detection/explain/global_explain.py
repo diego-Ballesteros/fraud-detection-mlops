@@ -35,7 +35,10 @@ declared, not avoided (ADR 0011).
 **PDP and ICE** vary raw columns and pass every modified row through the whole artifact, so
 the derivation recomputes the flag at each grid point and no row contradicts it (ADR 0011).
 The flag has no curve of its own: it is not an input. Values are the model's raw output, the
-log-odds, the scale of the SHAP values.
+log-odds, the scale of the SHAP values. The quantile grid stops at the 0.99 quantile, where the
+data is dense; a second, geometric grid covers a column's whole range, where its long tail is
+(ADR 0011, status note). ``raw_split_thresholds`` says where in that range the model can
+change its output at all.
 """
 
 from collections.abc import Callable, Mapping, Sequence
@@ -52,6 +55,7 @@ from sklearn.pipeline import Pipeline
 from fraud_detection.config import settings
 from fraud_detection.data.profiling import sample_with_all_positives
 from fraud_detection.features.builder import SIGNATURE_FEATURE
+from fraud_detection.features.pipeline import log1p_non_negative
 from fraud_detection.models.evaluation import DECISION_PRECISION, recall_at_precision
 
 EXPLANATION_NEGATIVE_ROWS: Final[int] = 20_000
@@ -388,6 +392,44 @@ def trees_splitting_on(pipeline: Pipeline, feature: str) -> pd.DataFrame:
     )
 
 
+MONEY_BRANCH: Final[str] = "money"
+"""Name of the money branch in the artifact's ColumnTransformer: ``log1p``, then scaling."""
+
+
+def raw_split_thresholds(pipeline: Pipeline, column: str) -> np.ndarray:
+    """The artifact's split thresholds on one money column, in the column's raw units.
+
+    The trees split on the transformed feature. The money branch is ``log1p`` followed by a
+    robust scaling, and both are strictly increasing, so each threshold maps back to exactly
+    one raw value: a row goes left when its raw value is at most that value, up to
+    floating-point rounding at the border. Between two consecutive raw thresholds, and above
+    the largest, the model's output cannot depend on the column.
+
+    Args:
+        pipeline: The fitted artifact; its last step is a LightGBM classifier.
+        column: A raw money column the artifact scales.
+
+    Returns:
+        One raw value per split node on the column, ascending.
+
+    Raises:
+        ValueError: If the column is not one of the money branch's columns, or the branch
+            does not start with ``log1p_non_negative``, whose inverse this function applies.
+    """
+    columns = pipeline[:-1].named_steps["preprocess"].named_steps["columns"]
+    money = columns.named_transformers_[MONEY_BRANCH]
+    names = list(money.feature_names_in_)
+    if column not in names:
+        raise ValueError(f"{column!r} is not a money column of the artifact: {names}")
+    if money.named_steps["log1p"].func is not log1p_non_negative:
+        raise ValueError("The money branch no longer starts with log1p_non_negative")
+    thresholds = trees_splitting_on(pipeline, column)["threshold"].to_numpy(dtype=float)
+    scaled = pd.DataFrame(0.0, index=range(len(thresholds)), columns=names)
+    scaled[column] = thresholds
+    logged = np.asarray(money.named_steps["scale"].inverse_transform(scaled), dtype=float)
+    return np.sort(np.expm1(logged[:, names.index(column)]))
+
+
 def compare_rankings(orderings: Mapping[str, pd.Series]) -> pd.DataFrame:
     """Put several importance measures side by side, each with its value and its rank.
 
@@ -410,6 +452,17 @@ def compare_rankings(orderings: Mapping[str, pd.Series]) -> pd.DataFrame:
 
 
 # --- ICE and PDP on raw columns, through the whole artifact -----------------------------------
+
+ICE_COLUMNS: Final[tuple[str, ...]] = ("oldbalanceOrg", "oldbalanceDest", "amount")
+"""The two raw columns among the first three model features by mean |SHAP|, and the flag's
+other input; the flag itself is not an input and has no curve (ADR 0011)."""
+
+ICE_CURVES_PER_GROUP: Final[int] = 100
+"""Individual curves drawn per group; each group's PDP averages every row of the group."""
+
+FULL_RANGE_COLUMN: Final[str] = "amount"
+"""The column whose quantile grid misses the frauds the rule does not cover (ADR 0011, status
+note): it gets a second figure, over its whole range."""
 
 ICE_GRID_POINTS: Final[int] = 50
 """Quantiles of the reference distribution used as grid points; equal ones are merged."""
@@ -436,6 +489,39 @@ def raw_grid(
     return np.unique(np.quantile(values.to_numpy(dtype=float), np.linspace(*quantiles, points)))
 
 
+FULL_RANGE_GRID_POINTS: Final[int] = 60
+"""Geometric points of the full-range grid, between the smallest positive value and the largest."""
+
+
+def log_grid(values: pd.Series, points: int = FULL_RANGE_GRID_POINTS) -> np.ndarray:
+    """Grid points over a non-negative column's whole range, evenly spaced on a log scale.
+
+    ``raw_grid`` stops at the 0.99 quantile, so a column with a long tail has no grid point
+    where its largest values are. This grid runs geometrically from the smallest positive value
+    to the largest, both included, and adds 0 when the column holds it.
+
+    Args:
+        values: The column over the rows that define its range.
+        points: How many geometric points to take.
+
+    Returns:
+        The distinct grid values, ascending.
+
+    Raises:
+        ValueError: If a value is negative, or none is positive.
+    """
+    array = values.to_numpy(dtype=float)
+    if (array < 0).any():
+        raise ValueError("A geometric grid needs non-negative values")
+    positive = array[array > 0]
+    if not len(positive):
+        raise ValueError("A geometric grid needs at least one positive value")
+    grid = np.geomspace(positive.min(), positive.max(), points)
+    if (array == 0).any():
+        grid = np.concatenate(([0.0], grid))
+    return np.unique(grid)
+
+
 def outside_grid(values: pd.Series, grid: np.ndarray) -> pd.Series:
     """Whether each row's own value lies outside the grid's range.
 
@@ -450,6 +536,32 @@ def outside_grid(values: pd.Series, grid: np.ndarray) -> pd.Series:
         True where the value is below the first grid point or above the last.
     """
     return (values < grid[0]) | (values > grid[-1])
+
+
+BELOW_GRID: Final[str] = "below"
+INSIDE_GRID: Final[str] = "inside"
+ABOVE_GRID: Final[str] = "above"
+GRID_SIDES: Final[tuple[str, ...]] = (BELOW_GRID, INSIDE_GRID, ABOVE_GRID)
+
+
+def grid_side(values: pd.Series, grid: np.ndarray) -> pd.Series:
+    """Which side of the grid's range each row's own value lies on.
+
+    ``outside_grid`` joins both sides, and a count of rows outside is not a count of rows
+    above: a column with zeros below the first grid point puts rows on the low side too.
+
+    Args:
+        values: The rows' own values of the varied column.
+        grid: The grid, ascending.
+
+    Returns:
+        One of ``GRID_SIDES`` per row, as an ordered categorical on the index of ``values``.
+    """
+    sides = np.select(
+        [values < grid[0], values > grid[-1]], [BELOW_GRID, ABOVE_GRID], default=INSIDE_GRID
+    )
+    dtype = pd.CategoricalDtype(list(GRID_SIDES), ordered=True)
+    return pd.Series(sides, index=values.index, name="side", dtype=dtype)
 
 
 def ice_curves(

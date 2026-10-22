@@ -268,6 +268,15 @@ correlativo.
   ausencia de evidencia de fallo se lee igual que la evidencia de éxito, salvo que haya un
   control que pruebe que el instrumento corrió.
 - **Referencias:** ERR-007, por la otra vez que un fallo se manifestó solo al ejecutar.
+- **Nota de estado (2026-10-21):** la instancia relacionada se repitió tres veces en el turno de los
+  notebooks 02 y 03, todas en código de Python pasado en línea a la shell; la tercera, al generar
+  el control positivo del grep de rutas absolutas, terminó en un `SyntaxError` antes de escribir
+  nada. Las dos primeras, con el heredoc entre comillas simples. Un `"\\n"` dentro de un f-string llegó al archivo como un salto de línea real, y
+  ruff lo detectó antes de ejecutar nada. En la otra, el texto que un reemplazo buscaba contenía
+  `\\n`, dejó de coincidir y la aserción del conteo de coincidencias detuvo el reemplazo antes de
+  escribir. Dónde se convierte la secuencia no está determinado: un heredoc entre comillas simples
+  no la interpreta. La defensa que funcionó fue editar con la herramienta de edición, no por la
+  shell, todo texto que lleve barras invertidas.
 
 ### ERR-010 · El ejecutor de notebooks corrompió los acentos y todas las verificaciones dieron verde · 2026-10-18
 
@@ -538,6 +547,12 @@ correlativo.
 - **Aprendizaje:** que un trabajo largo sea reanudable no es un lujo: es lo que convirtió un
   corte en un resultado parcial en vez de en una pérdida.
 - **Referencias:** EVAL-009, ADR 0010.
+- **Nota de estado (2026-10-21):** se repitió en el turno de los notebooks 02 y 03. El entorno
+  detuvo la ejecución final de los dos, en segundo plano, durante el notebook 02. `nbclient
+  --inplace` escribe el archivo solo al terminar, así que el corte no dejó una ejecución a medias:
+  dejó los dos notebooks sin salidas, como estaban antes de ejecutarse. Una ejecución que corre más
+  de lo que permite el primer plano necesita la terminal propia o la variable de entorno de la
+  defensa de arriba.
 
 ### ERR-018 · Un medidor de memoria leyó una llamada fallida como "cero" · 2026-10-20
 
@@ -559,3 +574,132 @@ correlativo.
   deja un resultado en ceros tiene que verificar su retorno, y el instrumento se prueba contra
   un caso conocido antes de leerlo.
 - **Referencias:** ERR-016.
+
+### ERR-019 · El PSI numérico de Evidently arma sus bins con producción, y su docstring dice otra cosa · 2026-10-21
+
+- **Síntoma:** no llegó a fallar. El docstring de `get_binned_data`, en evidently 0.7.23, dice
+  "Split variable into n buckets based on reference quantiles"; el código, para una columna
+  numérica con más de 20 valores distintos en referencia, arma
+  `np.histogram_bin_edges(pd.concat([reference, current]), bins="sturges")`. Medido sobre
+  producción: en las tres monetarias, el PSI de Evidently es 0,0059, 0,0123 y 0,0053, y el propio,
+  0,0034, 0,0055 y 0,0031.
+- **Mecanismo:** el docstring describe un diseño que la implementación no sigue. Los bins de
+  ancho igual sobre la unión hacen que los bordes dependan de la muestra actual: un estadístico
+  ajustado en parte con filas de producción. Además, el corte de 20 valores distintos se aplica
+  a la representación en punto flotante, y `hour_sin` y `hour_cos` tienen 21 y 22 valores
+  distintos, no 13: el seno de dos horas simétricas no da el mismo número de máquina. Inferidas,
+  las dos habrían tomado el camino de Sturges.
+- **Cómo se detectó:** leyendo el código instalado antes de usar su PSI, para saber qué bins usa,
+  y midiendo cuántos valores distintos tienen las features de hora.
+- **Corrección:** el PSI que decide es el propio, con bordes solo de referencia
+  (`monitoring.drift.FeatureProfile`). A Evidently se le declaran los tipos de columna, y en las
+  ocho discretas los dos instrumentos tienen que coincidir.
+- **Defensa:** nivel 2 para las discretas: `tests/test_report.py` afirma la igualdad, y el script
+  se detiene si no se cumple sobre los datos reales. Nivel 3 para las monetarias: está escrito
+  en el ADR 0012 y en `docs/analysis/monitoring.md`.
+- **Aprendizaje:** el docstring de una dependencia es una afirmación, no una medición. Antes de
+  publicar un número que sale de una librería, se lee el camino de código que lo produce.
+- **Referencias:** ADR 0012, `docs/analysis/monitoring.md`, sección 5.
+
+### ERR-020 · La política "la minor en uso" dejó un piso que admitía versiones rotas · 2026-10-21
+
+- **Síntoma:** la verificación en los pisos con `evidently>=0.7` resolvió evidently 0.7.1, y
+  fallaron 3 tests de `tests/test_report.py`: dos con `KeyError: 'config'` y uno porque el HTML
+  no empezaba con `<!doctype html>`.
+- **Mecanismo:** para una serie `0.x`, la política del ADR 0003 pone el piso en la minor en uso,
+  y eso supone una API estable dentro de la minor. Evidently la cambió entre parches: en la 0.7.15,
+  cada métrica del `dict()` de un `Snapshot` trae solo `id`, `metric_id` y `value` (medido), y la
+  clave `config` está en la 0.7.16; en la 0.7.1, además, `save_html` escribe un fragmento con
+  iframe y no un documento. La 0.7.0 ni siquiera resuelve: declara `numpy<2.1`, y shap 0.51
+  exige `numpy>=2`.
+- **Cómo se detectó:** la verificación del ADR 0003, que instala el conjunto de los pisos y corre
+  la suite. La suite usa la API del `dict()` y escribe el HTML, así que el piso roto no pasaba.
+- **Corrección:** el piso sube a 0.7.16, medido: resolviendo los pisos con cada versión
+  candidata, fallan 0.7.1, 0.7.12, 0.7.13, 0.7.14 y 0.7.15, y pasan 0.7.16, 0.7.17, 0.7.18 y
+  0.7.21. De 0.7.2 a 0.7.11 no se probaron una por una: que fallen es una inferencia, y el piso
+  no depende de ella. Con
+  `>=0.7.16`, la suite completa pasa en los pisos (244 tests). El lock no cambió.
+- **Defensa:** nivel 2: los tests que usan la API corren en la verificación de los pisos. Que la
+  verificación se corra es nivel 3: un procedimiento de `docs/DEPENDENCIES.md`.
+- **Aprendizaje:** en una serie `0.x`, la minor en uso es el punto de partida de una medición, no
+  un piso.
+- **Referencias:** ADR 0003, `docs/DEPENDENCIES.md`.
+
+### ERR-021 · Un test del PSI no podía fallar porque su caso era simétrico · 2026-10-21
+
+- **Síntoma:** el mutante que conserva los bins vacíos en los dos lados
+  (`kept = (r >= 0)`) sobrevivió a `tests/test_drift.py`: 18 tests en verde.
+- **Mecanismo:** el caso del test, `[5, 0, 5]` contra `[5, 0, 5]`, rellena el bin vacío con el
+  mismo piso en los dos lados (1e-4, porque la menor proporción no nula es 0,5 en ambos), así que
+  conservarlo suma `(1e-4 − 1e-4) · ln(1) = 0`. La rama bajo prueba solo se ve cuando los pisos
+  de los dos lados difieren.
+- **Cómo se detectó:** una corrida de cuatro mutantes a mano: tres murieron y este sobrevivió.
+- **Corrección:** un segundo caso, `[99.999, 1, 0]` contra `[50, 50, 0]`, con pisos 1e-11 y 1e-4:
+  conservado, el bin vacío sumaría ~0,0016. El mutante ahora falla.
+- **Defensa:** nivel 2, el test. La corrida de mutantes es nivel 3: un procedimiento.
+- **Aprendizaje:** es `docs/METHODOLOGY.md`, sección 7.6, otra vez. El caso elegido para mostrar
+  que "no pasa nada" era justo un caso donde no podía pasar nada.
+- **Referencias:** `tests/test_drift.py`.
+
+### ERR-022 · El último step de producción venía de la documentación, no del archivo · 2026-10-21
+
+- **Síntoma:** el ADR 0006 escribe el soporte de producción como {401..744}, y el prompt de la
+  fase 4 hablaba de 344 steps. El pie del parquet de producción dice 401–743: 343 steps.
+- **Mecanismo:** el 744 sale de la documentación pública del dataset ("Total steps 744"). El
+  ADR 0006 ya avisaba que no estaba medido, y el número pasó igual al prompt como un hecho. Con
+  744 las ventanas habrían sido 14 completas y 8 steps sobrantes, no 7: la decisión sobre la
+  ventana parcial dependía de esa cifra.
+- **Cómo se detectó:** leyendo el mínimo y el máximo de `step` en las estadísticas del pie del
+  parquet antes de cortar las ventanas, sin leer ninguna fila.
+- **Corrección:** las ventanas se construyen con el step máximo observado, no con un literal. El
+  ADR 0006 lleva una nota de estado.
+- **Defensa:** nivel 1 para las ventanas: salen de los datos. Nivel 3 para los documentos.
+- **Aprendizaje:** la lección de `docs/METHODOLOGY.md`, sección 1, otra vez: un número del
+  contexto de un prompt se mide dentro del turno.
+- **Referencias:** ADR 0006, ADR 0012.
+
+### ERR-023 · Una política de Windows bloquea un solo lanzador del entorno, y la tarea de notebooks no corre · 2026-10-21
+
+- **Síntoma:** `uv run jupyter execute --inplace notebooks/*.ipynb`, el comando de
+  `task notebooks`, falla con `[WinError 4551] Una directiva de Control de aplicaciones bloqueó
+  este archivo`. Ejecutado directo, `.venv/Scripts/jupyter-execute.exe` da "Permission denied".
+- **Mecanismo:** la política de Control de aplicaciones de Windows de la máquina de desarrollo
+  bloquea ese ejecutable, y no otros del mismo entorno: `jupyter.exe` corre. Los dos son
+  lanzadores de 47.104 bytes generados por uv; el bloqueado se creó el 2026-10-18 a las 14:42,
+  al agregar nbclient, y el que corre, a las 00:02. **Por qué la política distingue uno de otro
+  no está determinado.** La tarea `notebooks` (`task`) tampoco está instalada en la máquina.
+- **Cómo se detectó:** al ejecutar el notebook 04, antes de dar por buena ninguna salida.
+- **Corrección:** ninguna en el proyecto. Se corre el mismo código de nbclient sin pasar por el
+  lanzador, con el mismo modo UTF-8:
+  `PYTHONUTF8=1 uv run python -c "from nbclient.cli import main; main()" --inplace notebooks/*.ipynb`.
+  `Taskfile.yml` no se tocó: para un tercero sin esa política, `jupyter execute` funciona.
+- **Defensa:** nivel 3: está escrito aquí.
+- **Aprendizaje:** un comando de verificación que depende de un ejecutable del entorno puede
+  fallar por la máquina y no por el proyecto; el código que lo respalda se puede llamar sin el
+  lanzador.
+- **Referencias:** `Taskfile.yml`, ERR-010.
+
+### ERR-024 · Un conteo de dos lados se leyó como de un lado · 2026-10-21
+
+- **Síntoma:** `docs/analysis/interpretability.md` afirma, en las secciones 3 y 6, que "62 de los
+  92" fraudes que la regla no cubre "tienen un monto mayor" que el último punto de la grilla del ICE
+  de `amount`, 1.621.796,86. El prompt del notebook 03 repitió la cifra como hecho: "62 de los 92
+  fraudes fuera de la regla están por encima". Medido: 58 están por encima y 4 por debajo.
+- **Mecanismo:** `global_explain.outside_grid` devuelve `valor < primer punto` **o** `valor >
+  último punto`, y el script lo imprimía como "rows whose own amount lies outside the grid". El
+  documento lo escribió como "mayor". En `amount` la grilla empieza en el cuantil 0,01, 454,22, y
+  los 4 fraudes con `amount` 0 —el caso degenerado que el ADR 0006 sacó de la firma— caen por
+  debajo. En `oldbalanceOrg` la grilla empieza en 0, nada puede caer por debajo, y la misma lectura
+  era correcta (27 de 92): la columna cambió el significado del conteo, y el texto no.
+- **Cómo se detectó:** al medir para la figura de rango completo, separando el conteo por lado
+  antes de escribir la limitación en el notebook 03.
+- **Corrección:** `global_explain.grid_side` dice de qué lado cae cada fila, y su test construye un
+  caso con una fila de cada lado, donde "fuera" no es "encima". El script imprime la tabla por lado
+  y grupo, y el documento lleva una nota de estado.
+- **Defensa:** nivel 2 para la función: su test distingue los dos lados. Nivel 3 para la prosa que
+  resume un conteo: está escrito aquí.
+- **Aprendizaje:** el nombre de un conteo es parte de la medición. "Fuera" y "encima" son lo mismo
+  solo cuando la grilla empieza en el mínimo de la columna. Y otra vez la lección de ERR-022: una
+  cifra del contexto de un prompt se mide dentro del turno.
+- **Referencias:** `docs/analysis/interpretability.md`, ADR 0006, ADR 0011 (nota de estado),
+  ERR-022.
