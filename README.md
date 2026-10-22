@@ -133,9 +133,9 @@ El detalle está en [EVAL-001 a EVAL-004](docs/EVALUATION.md) y en el
 
 | Componente | Peso | Estado |
 |---|---|---|
-| Repositorio | 10% | Estructura, CI, pre-commit y los datos fuera de git: hecho. Notebooks `01_preprocessing` y `04_monitoring`: hechos. Notebooks 02 y 03: pendientes. La carpeta `app/` existe, vacía |
+| Repositorio | 10% | Estructura, CI, pre-commit y los datos fuera de git: hecho. Los cuatro notebooks, `01_preprocessing`, `02_training`, `03_interpretability` y `04_monitoring`: hechos. La carpeta `app/` existe, vacía |
 | Documentación | 10% | Diccionario de datos, doce ADR, registros de evaluación y de errores, y este README: hecho para lo construido hasta ahora |
-| Técnicas avanzadas de ML | 50% | Arnés de evaluación, baselines y registro en MLflow: hecho. Búsqueda de hiperparámetros: hecha, pero incompleta (8 de 150 ensayos, [EVAL-009](docs/EVALUATION.md)). Modelo elegido serializado y registrado en el Model Registry: hecho ([ADR 0010](docs/adr/0010-chosen-configuration.md)). Interpretabilidad local y global: medida sobre el artefacto ([análisis](docs/analysis/interpretability.md), [ADR 0011](docs/adr/0011-interpretability-design.md)); **falta el notebook 03** |
+| Técnicas avanzadas de ML | 50% | Arnés de evaluación, baselines y registro en MLflow: hecho. Búsqueda de hiperparámetros: hecha, pero incompleta (8 de 150 ensayos, [EVAL-009](docs/EVALUATION.md)). Modelo elegido serializado y registrado en el Model Registry: hecho ([ADR 0010](docs/adr/0010-chosen-configuration.md)). Interpretabilidad local y global: medida sobre el artefacto ([análisis](docs/analysis/interpretability.md), [ADR 0011](docs/adr/0011-interpretability-design.md)), con su narrativa en `notebooks/03_interpretability.ipynb`, y sus figuras adjuntas a la versión 1 del Model Registry |
 | Monitoreo | 30% | Desempeño por ventana, criterio de degradación y drift, medidos e interpretados sobre producción, y el reporte HTML de Evidently ([análisis](docs/analysis/monitoring.md), [ADR 0012](docs/adr/0012-monitoring-design.md), [EVAL-011](docs/EVALUATION.md)), y su narrativa en `notebooks/04_monitoring.ipynb` |
 | Reto ML 1: AutoML | +10% | Hecho sobre una búsqueda incompleta: el algoritmo es un hiperparámetro categórico entre regresión logística, Random Forest y LightGBM ([EVAL-009](docs/EVALUATION.md)) |
 | Reto ML 2: app web de monitoreo | +10% | Pendiente |
@@ -177,11 +177,13 @@ uv run python scripts/run_leakage_check.py    # controles: azar y test de permut
 uv run python scripts/run_default_models.py   # los modelos, por los dos esquemas
 ```
 
-La interpretabilidad se regenera sin MLflow, a partir del artefacto versionado y del parquet
-de referencia; escribe figuras y tablas en `reports/interpretability/`:
+La interpretabilidad se mide a partir del artefacto versionado y del parquet de referencia, y
+escribe figuras y tablas en `reports/interpretability/`. Su último paso las adjunta a la versión 1
+del Model Registry en DagsHub, y necesita las credenciales de `.env`: sin ellas, o sin red, los
+archivos quedan escritos y el script sale con código 1, porque un store local no tiene versión 1.
 
 ```bash
-uv run python scripts/run_interpretability.py # la compuerta de SHAP, lo global y lo local
+uv run python scripts/run_interpretability.py # la compuerta de SHAP, lo global, lo local y el registro
 ```
 
 El monitoreo lee los dos parquet y el artefacto, sin reajustar nada. Escribe sus tablas en

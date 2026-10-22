@@ -226,6 +226,13 @@ EVAL-006), y Random Forest, con una (máximo 0,00082 contra 0,9983, EVAL-007).
 | **Reproducción** | `uv run python scripts/run_default_models.py --models random_forest` |
 | **Interpretación** | Recupera casi todo lo que la regla deja fuera. Un resultado tan alto se lee con la prueba de permutación al lado (EVAL-004, con su nota de estado): no hay fuga de etiqueta. De los 92 fraudes de referencia que la regla no cubre, 57 tienen `amount` exactamente 10.000.000, el máximo de todos los fraudes del periodo (medición ad hoc del Ejecutor, no versionada). Que eso explique el recall de este modelo es una inferencia, no una medición. El estratificado da menos que el temporal (−0,0052) |
 
+**Nota de estado (2026-10-21):** los 57 de los 92 fraudes fuera de la regla con monto de
+exactamente 10.000.000, que esta entrada daba como medición ad hoc, quedaron medidos en
+`notebooks/03_interpretability.ipynb` con `profiling.rule_outcome`: la cifra se sostiene. La misma
+medición encontró 2.900 transacciones legítimas con ese monto, así que la cifra no es exclusiva del
+fraude ni un tope del simulador (`docs/analysis/interpretability.md`, nota de estado). Que esos
+fraudes expliquen el recall de este modelo sigue siendo una inferencia.
+
 ### EVAL-008 · LightGBM, hiperparámetros por defecto: no aprende · 2026-10-18
 
 | Campo | Valor |

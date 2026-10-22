@@ -14,11 +14,14 @@ from fraud_detection.config import Settings, settings
 from fraud_detection.models import registry
 from fraud_detection.models.registry import (
     ARTIFACT_PATH,
+    ARTIFACT_SHA256_TAG,
     CHOSEN_PARAMS,
+    INTERPRETABILITY_FOLDER,
     MODEL_INPUT_COLUMNS,
     REGISTERED_MODEL_NAME,
     build_chosen_pipeline,
     load_pipeline,
+    log_version_artifacts,
     register_pipeline,
     save_pipeline,
 )
@@ -123,3 +126,80 @@ def test_a_registered_version_loads_back_and_predicts_the_same(
     assert model_version.tags["chosen_trial"] == "5"
     assert model_version.run_id == run_id
     assert registry.CHOSEN_TRIAL == 5
+
+
+def _registered(fitted: Pipeline, store: TrackingTarget, sha256: str) -> tuple[str, str]:
+    example = synthetic_frame()[list(MODEL_INPUT_COLUMNS)].head(5).astype({"type": object})
+    return register_pipeline(
+        fitted, example, target=store, tags={ARTIFACT_SHA256_TAG: sha256}, params={}
+    )
+
+
+def _files(tmp_path: Path) -> list[Path]:
+    folder = tmp_path / "figures"
+    folder.mkdir()
+    paths = [folder / "waterfall_a.png", folder / "orderings.csv"]
+    for number, path in enumerate(paths):
+        path.write_bytes(f"content {number}".encode())
+    return paths
+
+
+def test_files_attach_to_the_run_of_the_version(
+    fitted: Pipeline, store: TrackingTarget, tmp_path: Path
+) -> None:
+    run_id, version = _registered(fitted, store, "abc123")
+    paths = _files(tmp_path)
+    attached_to = log_version_artifacts(
+        paths,
+        target=store,
+        version=version,
+        artifact_sha256="abc123",
+        tags={"interpretability": INTERPRETABILITY_FOLDER},
+    )
+    assert attached_to == run_id
+    client = mlflow.MlflowClient()
+    listed = sorted(item.path for item in client.list_artifacts(run_id, INTERPRETABILITY_FOLDER))
+    assert listed == sorted(f"{INTERPRETABILITY_FOLDER}/{path.name}" for path in paths)
+    for path in paths:
+        local = client.download_artifacts(
+            run_id, f"{INTERPRETABILITY_FOLDER}/{path.name}", str(tmp_path / "back")
+        )
+        assert Path(local).read_bytes() == path.read_bytes()
+    tags = client.get_model_version(REGISTERED_MODEL_NAME, version).tags
+    assert tags["interpretability"] == INTERPRETABILITY_FOLDER
+    # The logged model is still where it was, and still loads.
+    loaded = mlflow.sklearn.load_model(f"models:/{REGISTERED_MODEL_NAME}/{version}")
+    rows = synthetic_frame()[list(MODEL_INPUT_COLUMNS)]
+    assert np.array_equal(loaded.predict_proba(rows), fitted.predict_proba(rows))
+
+
+def test_files_are_refused_for_a_version_of_another_artifact(
+    fitted: Pipeline, store: TrackingTarget, tmp_path: Path
+) -> None:
+    run_id, version = _registered(fitted, store, "abc123")
+    with pytest.raises(ValueError, match="another model"):
+        log_version_artifacts(
+            _files(tmp_path), target=store, version=version, artifact_sha256="def456"
+        )
+    assert mlflow.MlflowClient().list_artifacts(run_id, INTERPRETABILITY_FOLDER) == []
+
+
+def test_attaching_refuses_before_uploading_anything(
+    fitted: Pipeline, store: TrackingTarget, tmp_path: Path
+) -> None:
+    run_id, version = _registered(fitted, store, "abc123")
+    paths = _files(tmp_path)
+    elsewhere = TrackingTarget("sqlite:///elsewhere.db", "e", "1", local=False)
+    with pytest.raises(RuntimeError, match="configure_mlflow"):
+        log_version_artifacts(paths, target=elsewhere, version=version, artifact_sha256="abc123")
+    with pytest.raises(ValueError, match="No file"):
+        log_version_artifacts([], target=store, version=version, artifact_sha256="abc123")
+    # One missing file stops the call before the existing one is uploaded.
+    with pytest.raises(FileNotFoundError):
+        log_version_artifacts(
+            [paths[0], tmp_path / "missing.png"],
+            target=store,
+            version=version,
+            artifact_sha256="abc123",
+        )
+    assert mlflow.MlflowClient().list_artifacts(run_id, INTERPRETABILITY_FOLDER) == []
