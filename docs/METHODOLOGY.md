@@ -347,6 +347,13 @@ entero y los seis chequeos pasaron, porque todos leían el mismo archivo mal dec
 único detector fue mirar las figuras. Por eso cada notebook y cada figura los mira una persona
 antes de cerrar una fase.
 
+### 7.7 · Los puntos ciegos de un instrumento estándar
+
+El PSI no es independiente del tamaño de muestra en ventanas chicas: con 80 filas el ruido de
+muestreo llega a 0,68, y con 4.474 queda en 0,0062. El PSI no detecta el drift de una categoría
+rara: una bandera que multiplica su prevalencia por 8,3 da PSI 0,012, que se lee como "estable".
+Una prevalencia que importa se mide directo.
+
 ---
 
 ## 8. Señales de que la metodología funciona

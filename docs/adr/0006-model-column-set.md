@@ -102,3 +102,7 @@ Queda declinado, no olvidado.
 **Nota del Ejecutor sobre la procedencia (2026-10-18):** el 744 de {401..744} sale de la
 documentación pública del dataset ("Total steps 744"). El step máximo de producción no se
 midió, y la decisión no depende de él: alcanza con que producción empiece en 401.
+
+**Nota de estado (2026-10-21, fase 4):** medido en las estadísticas del pie del parquet de
+producción, el step máximo es **743**, no 744: producción son 343 steps, del 401 al 743
+(ERR-022). La decisión no cambia, por la razón de la nota anterior.

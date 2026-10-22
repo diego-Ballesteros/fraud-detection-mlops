@@ -33,6 +33,7 @@
 
 | Dependencia | Cota declarada | Procedencia | Justificación |
 |---|---|---|---|
+| `evidently` | `>=0.7.16,<0.8` | medido | Entró en la fase 4 por el reporte HTML de drift y desempeño (ADR 0012), con una medición previa: agrega 40 paquetes al lock (154 → 194), todos dependencias base, entre ellos un servidor web (litestar, uvicorn), nltk, statsmodels, plotly y un cliente de telemetría, y no cambia la versión de ninguno de los existentes. `uv add` escribió `>=0.7.23`, la última. La cota de mayor es la del ADR 0003 para la serie `0.x`: la API cambió entre parches de la 0.7. El piso se midió en el punto exacto, porque la política "la minor en uso" dejaba pasar configuraciones que fallan (ERR-020): 0.7.0 no resuelve (declara `numpy<2.1`, y shap 0.51 exige `numpy>=2`); los tests del reporte fallan en 0.7.1 y de 0.7.12 a 0.7.15, las versiones medidas, porque el `dict()` de un `Snapshot` no trae la clave `config` en sus métricas, y en 0.7.1 además `save_html` escribe un fragmento con iframe, no un documento; 0.7.16 pasa la suite. De 0.7.2 a 0.7.11 no se probaron una por una. Su telemetría la lee `DO_NOT_TRACK`, que `monitoring/report.py` fija antes de importarlo |
 | `lightgbm` | `>=4.1` | medido | Inicio de la serie mayor en uso (ADR 0003), y subió a 4.1 por la política de ese ADR: con numpy 2.4.6, el que resuelve en los pisos, lightgbm 4.0.0 importa pero falla al ajustar sobre un DataFrame (`np.find_common_type was removed in the NumPy 2.0 release`); 4.1.0 ajusta. La verificación anterior no lo vio porque ningún test ajustaba LightGBM: lo encontró el test de `splits_on` (ERR-011, nota de estado). En la máquina de desarrollo, sin el VC++ Redistributable, `import lightgbm` solo, sin scikit-learn importado antes, falla con la versión del lock (`lib_lightgbm.dll (or one of its dependencies)`) y no con 4.0.0, que importa sola (medido en las dos). Por eso `models/estimators.py` lo importa dentro de su fábrica, y un test construye el modelo en un intérprete limpio. Desde el 2026-10-20 la máquina de desarrollo tiene el Redistributable x64 (14.51.36247, instalado por el humano), y lightgbm 4.7.0 importa solo; la importación diferida se queda, porque protege a un tercero que no lo tenga (ADR 0003, nota de estado de la fase 3) |
 | `matplotlib` | `>=3.8.4` | medido | Subió dos veces por la política del ADR 0003. Primero de 3.6 a 3.7: sin el VC++ Redistributable, `matplotlib.pyplot` 3.6.0 importado solo da `DLL load failed while importing _path`. Después a 3.8.4: con numpy 2.4.6, el que resuelve en los pisos desde que entraron mlflow y lightgbm, `matplotlib.pyplot` 3.7.0 no importa (`numpy.core.multiarray failed to import`), y con `>=3.8` el resolvedor elige 3.8.4, que importa y renderiza una figura. La nota sobre el backend inline (aclaración de alcance del encabezado) se midió en 3.7.0; el notebook no se corrió en 3.8.4 |
 | `mlflow` | `>=3.9,<4` | medido | La cota de mayor es la del ADR 0003: sin ella el resolvedor retrocede en silencio a mlflow 1.27.0. El piso subió de 3.0 a 3.9 por la política del ADR 0003 (un piso que admite una configuración que falla sube), con el punto exacto medido: con SQLAlchemy 2.1.5, la transitiva que se resuelve, mlflow 3.0.0 a 3.8.1 fallan al abrir el store sqlite (`cannot import name 'FallbackAsyncAdaptedQueuePool' from 'sqlalchemy.pool'`), y 3.9.0 pasa la suite. mlflow declara `pyarrow<26` |
@@ -67,12 +68,20 @@ No son dependencias directas: van en `[tool.uv] constraint-dependencies`.
 
 ## Última verificación en los pisos
 
-2026-10-20, al agregar shap. La resolución en los pisos fija 140 paquetes, entre ellos shap
-0.51.0, numba 0.68.0 y llvmlite 0.50.0, junto a scikit-learn 1.4.2, pandas 2.2.2, lightgbm
-4.1.0, mlflow 3.9.0 y numpy 2.4.6. Instalado ese conjunto con el procedimiento de abajo, la
-suite completa pasa (201 tests). Esta vez la suite sí ejerce lo que la dependencia aporta:
-`TreeExplainer` sobre un LightGBM ajustado, la aditividad de sus valores con un control que
-debe fallar, y las figuras de shap.
+2026-10-21, al agregar evidently. La resolución en los pisos fija 181 paquetes, entre ellos
+evidently 0.7.16, junto a scikit-learn 1.4.2, pandas 2.2.2, lightgbm 4.1.0, mlflow 3.9.0, shap
+0.51.0 y numpy 2.4.6. Instalado ese conjunto con el procedimiento de abajo, la suite completa
+pasa (244 tests), y ejerce lo que la dependencia aporta: un `Report` con el drift por PSI y la
+clasificación al umbral, cuyas cifras se comparan con las propias, y el HTML escrito a disco.
+Con el piso en `>=0.7`, la misma verificación resolvía evidently 0.7.1 y fallaban 3 tests; el
+punto exacto se buscó resolviendo los pisos con cada versión candidata (ERR-020).
+
+La verificación anterior fue el 2026-10-20, al agregar shap. La resolución en los pisos fijó
+140 paquetes, entre ellos shap 0.51.0, numba 0.68.0 y llvmlite 0.50.0, junto a scikit-learn
+1.4.2, pandas 2.2.2, lightgbm 4.1.0, mlflow 3.9.0 y numpy 2.4.6. Instalado ese conjunto con el
+procedimiento de abajo, la suite completa pasó (201 tests). Esa vez la suite sí ejercía lo que
+la dependencia aportaba: `TreeExplainer` sobre un LightGBM ajustado, la aditividad de sus
+valores con un control que debe fallar, y las figuras de shap.
 
 La verificación anterior fue el 2026-10-18, al agregar optuna. La resolución en los pisos
 fijó 136 paquetes, entre ellos scikit-learn 1.4.2, mlflow 3.9.0, lightgbm 4.1.0, optuna

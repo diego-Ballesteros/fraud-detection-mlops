@@ -105,12 +105,13 @@ dashboard sobre los mismos artefactos cubre ambos.
 |---|---|
 | Registros | ~6,3 millones |
 | Columnas | 11 |
-| Clase positiva | 0,0774% en referencia: 4.477 de 5.787.030 (medido el 2026-10-18) |
+| Clase positiva | 0,0774% en referencia: 4.477 de 5.787.030 (medido el 2026-10-18). 0,6491% en producción: 3.736 de 575.590 (medido el 2026-10-21, EVAL-011) |
 | Ubicación | `data/raw/`, gitignoreado |
 
-La tasa del periodo completo no se mide hasta la fase 4, porque requiere producción.
-Tampoco se estima: con la cifra de referencia y un dato externo se podría despejar la de
-producción por resta, y una estimación influye las decisiones igual que una medición.
+La tasa de producción no se midió hasta la fase 4, y tampoco se estimó: con la cifra de
+referencia y un dato externo se podía despejar por resta, y una estimación influye las
+decisiones igual que una medición. Medida, es 8,4 veces la de referencia, y la del periodo
+completo, 0,1291% (8.213 de 6.362.620). El porqué está en `docs/analysis/monitoring.md`.
 
 ### El corte temporal es el regalo de este proyecto
 
@@ -302,9 +303,9 @@ archivo ya existe hacen fallar el test.
 | tracking | mlflow_setup | existe |
 | explain | global_explain | existe |
 | explain | local_explain | existe |
-| monitoring | drift | fase 4 |
-| monitoring | performance | fase 4 |
-| monitoring | report | fase 4 |
+| monitoring | drift | existe |
+| monitoring | performance | existe |
+| monitoring | report | existe |
 
 ### Scripts de `scripts/`
 
@@ -323,9 +324,9 @@ direcciones, con las mismas reglas.
 | `diagnose_head.py` | Qué tiene la cabeza del ranking de un modelo permutado (ERR-013) | existe |
 | `diagnose_ap.py` | De qué bloques de puntaje sale el PR-AUC de un modelo permutado (ERR-013) | existe |
 | `run_interpretability.py` | Explica el artefacto: la compuerta de SHAP sobre la firma, las importancias globales lado a lado, ICE y PDP, y los cuatro casos locales | existe |
-| `run_monitoring.py` | Genera el reporte HTML | fase 4 |
+| `run_monitoring.py` | Mide producción: el desempeño por ventanas de 24 steps al umbral fijo junto a la regla, el criterio de degradación, el drift por PSI y KS, el reporte HTML de Evidently y su contraste con los instrumentos propios | existe |
 
-`run_prediction.py` salió del plan: el monitoreo calcula sus propias predicciones sobre producción y la app del Reto 2 predice de forma interactiva cargando el artefacto, así que un script de predicción por lotes no tiene usuario; si la fase 4 lo necesita, se agrega entonces.
+`run_prediction.py` salió del plan: el monitoreo calcula sus propias predicciones sobre producción y la app del Reto 2 predice de forma interactiva cargando el artefacto, así que un script de predicción por lotes no tiene usuario. La fase 4 no lo necesitó: `run_monitoring.py` puntúa producción cargando el artefacto.
 
 ---
 

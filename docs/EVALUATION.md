@@ -308,3 +308,20 @@ es una inferencia, no una medición.
 | **Run de MLflow** | `407b9dc2f5e14fc69cf1e6bfe215ebd3` (43), `ff284846e2324d9383491803c1fe8d2c` (44), `275800d052f24f8fa84079ece18657ff` (45) |
 | **Reproducción** | `uv run python scripts/register_model.py` (el paso 1) |
 | **Interpretación** | La inquietud queda cerrada para la semilla, y se midió. La medición no era vacía: el PR-AUC muestra que el modelo cambió con la semilla. Con `subsample` y `colsample_bytree` en 1, la vía más probable es la muestra de filas con que LightGBM construye los bins, pero eso es hipótesis y no medición. Lo que la medición **no** cubre: la sensibilidad a los hiperparámetros vecinos, que es otra pregunta |
+
+### EVAL-011 · El artefacto sobre producción, al umbral fijo, por ventanas de un día · 2026-10-21
+
+| Campo | Valor |
+|---|---|
+| **Pregunta** | ¿Cómo rinde el artefacto elegido (ADR 0010) sobre un periodo que no vio, con el umbral fijado en referencia (ADR 0011), y se degrada con el tiempo? |
+| **Periodo evaluado** | Producción, steps 401–743, leída por primera vez: 14 ventanas completas de 24 steps (401–736) y una parcial de 7 (737–743) |
+| **Tamaño de muestra** | 575.590 filas y 3.736 positivos (prevalencia 0,006491, 8,4 veces la de referencia). Ventanas completas: de 4.474 a 209.359 filas, con 232 a 308 positivos. La parcial: 80 filas, las 80 fraude |
+| **Método** | El artefacto cargado, con su sha256 verificado contra el ADR 0010; nada se reajusta. El modelo marca una fila con puntaje ≥ 0,42775088540908546, y el script verifica que ese umbral es el que la métrica de decisión elige sobre referencia. Criterio de degradación declarado antes de medir (ADR 0012): recall por ventana completa contra 0,9934; 2 ventanas seguidas debajo son alerta, 3 son degradación |
+| **Métrica** | Recall y precisión al umbral fijo: en producción el umbral es el punto de operación y no se puede elegir con sus etiquetas. PR-AUC, ROC-AUC y Brier como contexto |
+| **Resultado** | Agregado: **recall 0,9976** (3.727 de 3.736) y **precisión 0,9997** (un falso positivo en 14 días). Por ventana completa: recall 0,9978 ± 0,0025 (0,9920–1,0000) y precisión 0,9997 ± 0,0010, siempre sobre el piso de 0,99. PR-AUC 0,9997, ROC-AUC 0,9997, Brier 0,000017. Criterio: solo la ventana 2 cae debajo de la línea (248 de 250): **sin alerta**. La tabla por ventana está en `docs/analysis/monitoring.md` |
+| **Baseline** | `SignatureRule` sobre las mismas filas: **precisión 1,000 y recall 0,9724** (3.633 de 3.736); por ventana completa, recall 0,9736 ± 0,0173. PR-AUC 0,9726, ROC-AUC 0,9862, Brier 0,000179. El modelo supera a la regla en +0,0252 de recall: 94 de los 103 fraudes que la regla no ve. El modelo en la validación temporal de referencia: 0,9970 ± 0,0036 (EVAL-009) |
+| **Número de particiones** | 14 ventanas completas; la parcial entra al agregado y queda fuera de la dispersión y del criterio |
+| **Dispersión** | Desviación estándar muestral (ddof = 1) entre las 14 ventanas completas |
+| **Run de MLflow** | `b7eabc74ebc64ae68b05472ff437bb3f` (`monitoring__production`), con la serie de cada ventana como pasos. `aeee8e748a174686b2c9668d019f07b8` y `e9a7d78d74744e18bdffcb0e089a870d` son corridas anteriores del mismo script en el mismo turno, con las mismas cifras de desempeño (`docs/analysis/monitoring.md`, nota) |
+| **Reproducción** | `uv run python scripts/run_monitoring.py` |
+| **Interpretación** | El modelo no se degradó: su recall fuera de muestra es el de la validación temporal. La regla se sostiene con precisión 1,000, así que la firma es del agente de fraude y no del periodo. La precisión del modelo subió porque la prevalencia se multiplicó por 8,4 a umbral fijo, no porque el modelo mejorara. **No permite concluir** nada sobre datos reales, donde un atacante se adapta, ni nada causal entre drift y desempeño. Tampoco tiene mucho poder: con estas ventanas, una alerta saldría por azar con probabilidad 0,30 |
