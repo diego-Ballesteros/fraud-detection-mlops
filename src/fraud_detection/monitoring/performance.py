@@ -19,6 +19,15 @@ marked partial, and stays out of the degradation criterion; its rows count in th
 
 **The baseline goes beside the model, always:** ``SignatureRule`` on the same rows.
 
+**Segments** split the same rows by a column, such as the transaction type, because an
+aggregate hides a segment with no positives: there the model cannot miss a fraud, so its
+recall is undefined, not perfect, and the table keeps it as NaN.
+
+**The price of the next frauds** is read off the scores below the threshold, never applied:
+``lowering_cost`` says what lowering the threshold to each missed positive would add to the
+queue. It is a price list for a decision that belongs to whoever pays the reviews, not a way
+to pick a threshold on production.
+
 **Degradation criterion,** declared before measuring production (ADR 0012). The model's
 recall at the fixed threshold falls below ``DEGRADATION_LINE`` in a complete window when it
 drops more than ``REFERENCE_DISPERSION`` from ``REFERENCE_RECALL``, the mean and spread of the
@@ -297,6 +306,92 @@ def window_table(
             }
         )
     return pd.DataFrame(rows).set_index("window")
+
+
+def segment_table(
+    segments: np.ndarray,
+    labels: np.ndarray,
+    scores: np.ndarray,
+    rule_flags: np.ndarray,
+    threshold: float = OPERATING_THRESHOLD,
+) -> pd.DataFrame:
+    """``evaluate_rows`` for each value of a segmenting column, such as the transaction type.
+
+    Args:
+        segments: The segment of each row.
+        labels: 0/1 labels.
+        scores: The model's score for the positive class.
+        rule_flags: ``SignatureRule``'s 0/1 flags.
+        threshold: The model's threshold.
+
+    Returns:
+        One row per distinct segment, sorted, indexed by segment, with its metrics. A segment
+        without positives keeps its recall as NaN, and one where nothing is flagged keeps its
+        precision as NaN: neither is a perfect score.
+
+    Raises:
+        ValueError: If the arrays differ in length.
+    """
+    g = np.asarray(segments)
+    y, s, r = np.asarray(labels), np.asarray(scores, dtype=float), np.asarray(rule_flags)
+    if not len(g) == len(y) == len(s) == len(r):
+        raise ValueError(
+            f"segments {len(g)}, labels {len(y)}, scores {len(s)} and rule flags {len(r)} "
+            "differ in length"
+        )
+    rows = []
+    for segment in np.unique(g):
+        rows_in = g == segment
+        rows.append(
+            {"segment": segment, **evaluate_rows(y[rows_in], s[rows_in], r[rows_in], threshold)}
+        )
+    return pd.DataFrame(rows).set_index("segment")
+
+
+def lowering_cost(
+    labels: np.ndarray, scores: np.ndarray, threshold: float = OPERATING_THRESHOLD
+) -> pd.DataFrame:
+    """What catching the positives the threshold misses would cost, one score at a time.
+
+    For each distinct score of a missed positive, from the highest down, a threshold lowered
+    to that score flags every row whose score is at least that high, so positives with the
+    same score are gained together. Counts are cumulative from ``threshold``: the last row is
+    the price of catching every positive. Nothing is applied; the module docstring says why.
+
+    Args:
+        labels: 0/1 labels.
+        scores: The model's score for the positive class.
+        threshold: The threshold whose misses are priced.
+
+    Returns:
+        One row per distinct score of a missed positive, highest first: ``score``,
+        ``positives_gained`` and ``negatives_added`` (cumulative, against ``threshold``), and
+        ``recall`` and ``precision`` with the threshold at that score. Empty when no positive
+        is missed.
+
+    Raises:
+        ValueError: If the two arrays differ in shape.
+    """
+    y = np.asarray(labels).astype(bool)
+    s = np.asarray(scores, dtype=float)
+    if y.shape != s.shape:
+        raise ValueError(f"labels {y.shape} and scores {s.shape} differ in shape")
+    now = confusion(y, s >= threshold)
+    missed = np.unique(s[y & (s < threshold)])[::-1]
+    rows = []
+    for score in missed:
+        lowered = confusion(y, s >= score)
+        rows.append(
+            {
+                "score": float(score),
+                "positives_gained": lowered.true_positives - now.true_positives,
+                "negatives_added": lowered.false_positives - now.false_positives,
+                "recall": lowered.recall,
+                "precision": lowered.precision,
+            }
+        )
+    columns = ["score", "positives_gained", "negatives_added", "recall", "precision"]
+    return pd.DataFrame(rows, columns=columns)
 
 
 def spread(table: pd.DataFrame, columns: Sequence[str]) -> pd.DataFrame:

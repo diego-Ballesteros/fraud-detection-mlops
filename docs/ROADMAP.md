@@ -5,6 +5,10 @@
 >
 > **Especialización MLE 2026 — Curso III**
 > Documento de diseño y plan de ejecución.
+>
+> **Estado al 2026-10-21:** las fases 0 a 4 están cerradas y mergeadas a `develop`; la 5 está en
+> curso. El Reto 2 no se hizo. En la sección 9, cada casilla marcada dice dónde está su evidencia,
+> y cada una sin marcar, qué falta.
 
 ---
 
@@ -189,7 +193,12 @@ original; donde difiere, manda el ADR.
 | Matriz de confusión con costos | Traduce el modelo a pérdidas, no a porcentajes |
 
 **Accuracy se reporta una sola vez**, al lado del clasificador trivial, para dejar
-demostrado por qué no decide nada.
+demostrado por qué no decide nada (`docs/MODEL_CARD.md`, sección 4).
+
+**Lo que no se hizo de esta tabla:** Precision@k y la matriz de confusión con costos. El punto
+de operación lo fija la métrica de decisión (ADR 0011), y una matriz de costos necesita el costo
+de una revisión, que no se midió. Lo que se midió en su lugar es cuántas revisiones cuesta cada
+fraude adicional (EVAL-012).
 
 ### 5.2 Validación
 
@@ -218,14 +227,14 @@ validación cruzada del AutoML respeta el orden temporal.
 |---|---|---|
 | Gestión de paquetes | **UV** | Exclusivamente |
 | Datos | pandas, pyarrow | Parquet y dtypes explícitos desde el día uno |
-| ML | scikit-learn, LightGBM, XGBoost | Candidatos del espacio de búsqueda |
-| Desbalance | imbalanced-learn | Se mide, no se asume |
+| ML | scikit-learn, LightGBM, XGBoost | Candidatos del espacio de búsqueda. XGBoost no entró: el espacio quedó en regresión logística, Random Forest y LightGBM (EVAL-009) |
+| Desbalance | imbalanced-learn | No entró. El desbalance se trató con pesos de clase dentro de la búsqueda; el remuestreo no se midió |
 | **Optimización** | **Optuna** | El algoritmo entra como hiperparámetro (Reto 1) |
 | **Interpretabilidad** | **SHAP, sklearn** | Global: feature importance, PDP, ICE. Local: SHAP. LIME quedó fuera (fase 3, alcance declinado) |
 | **Monitoreo** | **Evidently** | Reportes HTML de drift y desempeño |
 | Tracking | **MLflow + DagsHub** | Registry incluido |
-| **App** | **Streamlit** | Dashboard de monitoreo (Reto 2) |
-| Testing | pytest, pytest-cov | Objetivo: ≥80% |
+| **App** | **Streamlit** | Dashboard de monitoreo (Reto 2). No se hizo, y no está en las dependencias |
+| Testing | pytest, pytest-cov | Objetivo: ≥80%. Medido el 2026-10-21: 98% |
 | Calidad | ruff, mypy | Pre-commit hooks |
 | CI | GitHub Actions | Lint + tipos + tests |
 
@@ -268,8 +277,8 @@ fraud-detection-mlops/
 │
 ├── scripts/                       ← sus scripts y su estado: tabla de abajo
 │
-├── app/                           ← requisito explícito (Reto 2)
-│   └── monitoring_app.py
+├── app/                           ← requisito explícito (Reto 2); hoy solo .gitkeep
+│   └── monitoring_app.py          ← no se construyó
 │
 ├── reports/deliverables/          ← el Report HTML del monitoreo
 ├── tests/
@@ -323,8 +332,8 @@ direcciones, con las mismas reglas.
 | `run_leakage_check.py` | La prueba del objetivo barajado, como test de permutación con el clasificador aleatorio como control; es de la fase 2 porque necesita un modelo contra el que barajar | existe |
 | `diagnose_head.py` | Qué tiene la cabeza del ranking de un modelo permutado (ERR-013) | existe |
 | `diagnose_ap.py` | De qué bloques de puntaje sale el PR-AUC de un modelo permutado (ERR-013) | existe |
-| `run_interpretability.py` | Explica el artefacto: la compuerta de SHAP sobre la firma, las importancias globales lado a lado, ICE y PDP —`amount` también sobre su rango completo—, los cuatro casos locales, y adjunta figuras y tablas a la versión 1 del Model Registry | existe |
-| `run_monitoring.py` | Mide producción: el desempeño por ventanas de 24 steps al umbral fijo junto a la regla, el criterio de degradación, el drift por PSI y KS, el reporte HTML de Evidently y su contraste con los instrumentos propios | existe |
+| `run_interpretability.py` | Explica el artefacto: la compuerta de SHAP sobre la firma, las importancias globales lado a lado, ICE y PDP —`amount` también sobre su rango completo—, los cuatro casos locales con las cuentas del caso b, y adjunta figuras y tablas a la versión 1 del Model Registry | existe |
+| `run_monitoring.py` | Mide producción: el desempeño por ventanas de 24 steps al umbral fijo junto a la regla, por tipo de transacción, el precio de los fraudes que el modelo pierde, el criterio de degradación, el drift por PSI y KS, el reporte HTML de Evidently y su contraste con los instrumentos propios | existe |
 
 `run_prediction.py` salió del plan: el monitoreo calcula sus propias predicciones sobre producción y la app del Reto 2 predice de forma interactiva cargando el artefacto, así que un script de predicción por lotes no tiene usuario. La fase 4 no lo necesitó: `run_monitoring.py` puntúa producción cargando el artefacto.
 
@@ -364,15 +373,15 @@ de git-flow. Si el enunciado menciona una rama "Development", es esta misma rama
 
 **Objetivo:** esqueleto completo antes de tocar una línea de modelado.
 
-- [ ] Estructura de carpetas, `pyproject.toml`, `uv sync`
-- [ ] `.gitignore`, `.env.example`, pre-commit, `Taskfile.yml`
-- [ ] CI en GitHub Actions: lint + tipos + tests
-- [ ] `config.py` con `RANDOM_STATE` y las rutas del proyecto
-- [ ] `docs/GIT_STRATEGY.md`
-- [ ] Registros vacíos: `EVALUATION.md`, `ERRORS_AND_LEARNINGS.md`
-- [ ] Cuenta de DagsHub conectada, `.env` con las credenciales de MLflow
+- [x] Estructura de carpetas, `pyproject.toml`, `uv sync`
+- [x] `.gitignore`, `.env.example`, pre-commit, `Taskfile.yml`
+- [x] CI en GitHub Actions: lint + tipos + tests (`.github/workflows/ci.yml`)
+- [x] `config.py` con `RANDOM_STATE` y las rutas del proyecto (ADR 0001)
+- [x] `docs/GIT_STRATEGY.md`
+- [x] Registros vacíos: `EVALUATION.md`, `ERRORS_AND_LEARNINGS.md`
+- [x] Cuenta de DagsHub conectada, `.env` con las credenciales de MLflow
 
-> ✅ **Hito 0:** repo profesional funcionando, CI en verde.
+> ✅ **Hito 0:** repo profesional funcionando, CI en verde. **Cumplido.**
 
 ---
 
@@ -381,20 +390,21 @@ de git-flow. Si el enunciado menciona una rama "Development", es esta misma rama
 **Objetivo:** entender el dataset y cerrar el contrato de datos. Es la fase donde se decide
 qué columnas pueden entrar al modelo.
 
-- [ ] Carga con dtypes explícitos (6,3M filas; pandas en memoria duele si no)
-- [ ] `docs/DATA_DICTIONARY.md` con las 11 columnas y, para cada una, **cuándo existe**
-- [ ] Validador de esquema que falla ruidosamente ante lo que el contrato no conoce
-- [ ] **Medición del corte temporal:** prevalencia, volumen y tipos de transacción en cada
-      periodo por separado
-- [ ] **Caza de fuga, medida:** consistencia aritmética de los saldos, y qué pasa con la
-      columna que produce el propio sistema de detección
-- [ ] Feature engineering sobre lo que sí existe antes de la transacción
-- [ ] Pipeline de preprocesamiento serializable
-- [ ] `notebooks/01_preprocessing.ipynb` — narrativa de lo medido, mínimo 12 visualizaciones
-      con interpretación escrita
+- [x] Carga con dtypes explícitos (6,3M filas; pandas en memoria duele si no)
+- [x] `docs/DATA_DICTIONARY.md` con las 11 columnas y, para cada una, **cuándo existe**
+- [x] Validador de esquema que falla ruidosamente ante lo que el contrato no conoce
+- [x] **Medición del corte temporal:** prevalencia, volumen y tipos de transacción en cada
+      periodo por separado. La de referencia, en esta fase; la de producción, a propósito, recién
+      en la fase 4 (EVAL-011)
+- [x] **Caza de fuga, medida:** consistencia aritmética de los saldos, y qué pasa con la
+      columna que produce el propio sistema de detección (ADR 0006)
+- [x] Feature engineering sobre lo que sí existe antes de la transacción
+- [x] Pipeline de preprocesamiento serializable (ADR 0008)
+- [x] `notebooks/01_preprocessing.ipynb` — narrativa de lo medido, mínimo 12 visualizaciones
+      con interpretación escrita (tiene 13)
 
 > ✅ **Hito 1:** dataset procesado y reproducible con un comando; las columnas prohibidas
-> declaradas con su razón en un ADR.
+> declaradas con su razón en un ADR. **Cumplido** (ADR 0006).
 
 ---
 
@@ -402,19 +412,26 @@ qué columnas pueden entrar al modelo.
 
 **Objetivo:** el 50% de la rúbrica, salvo la interpretabilidad.
 
-- [ ] MLflow contra DagsHub; primer experimento
-- [ ] **Baseline trivial** y clasificador aleatorio — el piso contra el que todo se compara
-- [ ] **Prueba del target barajado** — si no colapsa, paramos y depuramos
-- [ ] Modelo lineal regularizado como referencia simple
-- [ ] **Pipeline de AutoML (Reto 1):** espacio de búsqueda con Optuna donde el algoritmo es
-      un hiperparámetro. Candidatos: regresión logística, random forest, LightGBM, XGBoost
-- [ ] Estrategias de desbalance medidas: sin tratamiento vs. pesos de clase vs. remuestreo
-- [ ] Selección del umbral operativo con una matriz de costos explícita
-- [ ] Modelo ganador registrado en MLflow Model Registry
-- [ ] `notebooks/02_training.ipynb`
+- [x] MLflow contra DagsHub; primer experimento
+- [x] **Baseline trivial** y clasificador aleatorio — el piso contra el que todo se compara
+      (EVAL-001, EVAL-003)
+- [x] **Prueba del target barajado** — si no colapsa, paramos y depuramos. No colapsó con una
+      permutación, se paró, y con 20 pasa (EVAL-002, EVAL-004, ERR-013)
+- [x] Modelo lineal regularizado como referencia simple (EVAL-006)
+- [x] **Pipeline de AutoML (Reto 1):** espacio de búsqueda con Optuna donde el algoritmo es
+      un hiperparámetro. Candidatos: regresión logística, random forest y LightGBM; **XGBoost no
+      entró**. La búsqueda se cortó en 8 de 150 ensayos (EVAL-009)
+- [ ] Estrategias de desbalance medidas: sin tratamiento vs. pesos de clase vs. remuestreo.
+      **Parcial:** los pesos de clase entraron al espacio de búsqueda como un hiperparámetro más,
+      sin una comparación aislada contra el modelo sin tratamiento; **el remuestreo no se midió**
+- [ ] Selección del umbral operativo con una matriz de costos explícita. **No se hizo:** el
+      umbral lo eligió la métrica de decisión (ADR 0011), y una matriz de costos necesita el costo
+      de una revisión, que no se midió
+- [x] Modelo ganador registrado en MLflow Model Registry (ADR 0010)
+- [x] `notebooks/02_training.ipynb`
 
 > ✅ **Hito 2:** modelo productivo registrado, con su baseline al lado y el AutoML
-> documentado. **Reto ML 1 cubierto.**
+> documentado. **Reto ML 1 cubierto.** **Cumplido**, sobre una búsqueda incompleta.
 
 ---
 
@@ -423,18 +440,18 @@ qué columnas pueden entrar al modelo.
 **Objetivo:** la mitad del 50% que casi nadie hace bien. El enunciado pide interpretación
 **local y global**, no solo un gráfico de importancias.
 
-- [ ] **Global:** feature importance (permutación y del modelo), SHAP summary, PDP, ICE
-- [ ] **Local:** SHAP waterfall sobre casos elegidos con criterio — un fraude que la regla
+- [x] **Global:** feature importance (permutación y del modelo), SHAP summary, PDP, ICE
+- [x] **Local:** SHAP waterfall sobre casos elegidos con criterio — un fraude que la regla
       y el modelo capturan, uno que la regla no captura y el modelo sí, un falso positivo, una
       legítima cerca del umbral (ADR 0011)
-- [ ] Contraste entre importancia por permutación y la del modelo: cuando difieren, dicen
+- [x] Contraste entre importancia por permutación y la del modelo: cuando difieren, dicen
       algo
-- [ ] **Interpretación escrita**, no solo figuras. Qué aprendió el modelo y si tiene sentido
-      de negocio
-- [ ] `notebooks/03_interpretability.ipynb`
+- [x] **Interpretación escrita**, no solo figuras. Qué aprendió el modelo y si tiene sentido
+      de negocio (`docs/analysis/interpretability.md`)
+- [x] `notebooks/03_interpretability.ipynb`
 
 > ✅ **Hito 3:** el modelo explicado en los dos niveles, con los nombres de features
-> propagados correctamente desde el pipeline.
+> propagados correctamente desde el pipeline. **Cumplido.**
 
 **Alcance declinado: LIME.** Medido contra el lock, agrega seis paquetes nuevos —lime y cinco
 transitivos: scikit-image, imageio, lazy-loader, networkx y tifffile— para un contraste
@@ -447,34 +464,42 @@ LIME, y SHAP cubre las dos (ADR 0011).
 
 **Objetivo:** el 30% de la rúbrica más el Reto 2.
 
-- [ ] `monitoring/drift.py`: PSI y KS por feature, con umbrales declarados y **controles
+- [x] `monitoring/drift.py`: PSI y KS por feature, con umbrales declarados y **controles
       positivos** en los tests
-- [ ] Drift de `step >= 401` contra la referencia, feature por feature
-- [ ] Drift del target: cómo cambia la prevalencia entre periodos
-- [ ] Desempeño del modelo en producción, **por ventanas de steps** y no como un número
-- [ ] Reportes de Evidently → `reports/deliverables/`
-- [ ] **Interpretación escrita del monitoreo:** qué features driftan, por qué, y si el
-      desempeño se degrada con ellas
+- [x] Drift de `step >= 401` contra la referencia, feature por feature
+- [x] Drift del target: cómo cambia la prevalencia entre periodos
+- [x] Desempeño del modelo en producción, **por ventanas de steps** y no como un número
+      (EVAL-011); y por tipo de transacción, desde la fase 5 (EVAL-012)
+- [x] Reportes de Evidently → `reports/deliverables/`
+- [x] **Interpretación escrita del monitoreo:** qué features driftan, por qué, y si el
+      desempeño se degrada con ellas (`docs/analysis/monitoring.md`)
 - [ ] **App de Streamlit (Reto 2):** métricas calculadas sobre los artefactos, con la
-      ventana de análisis seleccionable
-- [ ] `notebooks/04_monitoring.ipynb`
+      ventana de análisis seleccionable. **No se hizo**; se decide después del cierre
+- [x] `notebooks/04_monitoring.ipynb`
 
 > ✅ **Hito 4:** drift y desempeño medidos e interpretados, reporte HTML generado, app
-> funcionando. **Reto ML 2 cubierto.**
+> funcionando. **Reto ML 2 cubierto.** **Cumplido sin la app:** el Reto 2 no está cubierto.
 
 ---
 
 ### FASE 5 — Cierre · `feature/05-closing`
 
 - [ ] **README completo:** problema, diagrama de flujo, dataset y diccionario, Model Card,
-      resultados con su baseline, interpretabilidad, monitoreo, conclusiones
-- [ ] Model Card final: limitaciones, uso previsto, uso **no** previsto
-- [ ] Cobertura de tests ≥80%
+      resultados con su baseline, interpretabilidad, monitoreo, conclusiones. **Parcial:** tiene
+      el problema, el dataset con el enlace al diccionario, el Model Card, los resultados de
+      producción con la regla al lado, el monitoreo y cómo leer las métricas. Falta el diagrama de
+      flujo, que está en la sección 4 de este documento, y la interpretabilidad va enlazada, no
+      resumida
+- [x] Model Card final: limitaciones, uso previsto, uso **no** previsto (`docs/MODEL_CARD.md`)
+- [x] Cobertura de tests ≥80%: 98%, medida el 2026-10-21
 - [ ] **Verificación en clon limpio:** seguir solo lo que dice el README y confirmar que las
-      cifras coinciden
+      cifras coinciden. **Parcial:** el 2026-10-21, un clon sin datos instaló el lock, pasó la
+      suite y cargó el artefacto con sus probabilidades documentadas; que las cifras coincidan
+      necesita el CSV en el clon, y no se hizo
 - [ ] Enlace público de MLflow verificado sin credenciales
 - [ ] Revisión de secretos y datos pesados en el historial
-- [ ] PR final `develop` → `main`, tag `v1.0.0` con release notes
+- [ ] PR final `develop` → `main`, tag `v1.0.0` con release notes. La PR #14 ya llevó `develop`
+      a `main` antes del cierre; faltan la de la fase 5 y el tag
 - [ ] **Congelar**
 
 > ✅ **Hito 5 — Proyecto entregado.**
@@ -502,7 +527,7 @@ LIME, y SHAP cubre las dos (ADR 0011).
 | Report HTML | 30% | `reports/deliverables/` | 4 |
 | Documentación y docstrings | 10% | Todo el repositorio | Todas |
 | **Reto ML 1** — AutoML | +10% | Espacio de búsqueda multi-algoritmo | 2 |
-| **Reto ML 2** — app web | +10% | `app/monitoring_app.py` | 4 |
+| **Reto ML 2** — app web | +10% | `app/monitoring_app.py`: **no se hizo** | 4 |
 
 ---
 

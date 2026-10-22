@@ -71,3 +71,9 @@ reimplementa una transformación.
 **Nota del Ejecutor sobre la procedencia (2026-10-19):** el ajuste final sobre toda la
 referencia tardó 14,5 s y se midió con algo de swap en el ambiente (el archivo de paginación
 pasó de 16% a 23%); ese tiempo no es un costo de referencia.
+
+**Nota de estado (2026-10-21, fase 5):** la sección "El artefacto" dice que "el notebook 03, el
+monitoreo y la app lo cargan". La tercera parte es falsa: la app del Reto 2 no se construyó, y
+`app/` solo contiene `.gitkeep`. Lo cargan el notebook 03, `scripts/run_interpretability.py`,
+`scripts/run_monitoring.py` y el notebook 04, y un clon limpio del repositorio lo carga con el
+mismo sha256 (`docs/MODEL_CARD.md`, identificación). La decisión no cambia.

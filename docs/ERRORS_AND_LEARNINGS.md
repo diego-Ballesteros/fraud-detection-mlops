@@ -703,3 +703,26 @@ correlativo.
   cifra del contexto de un prompt se mide dentro del turno.
 - **Referencias:** `docs/analysis/interpretability.md`, ADR 0006, ADR 0011 (nota de estado),
   ERR-022.
+
+### ERR-025 · El código de salida de una tubería es el del último comando · 2026-10-21
+
+- **Síntoma:** en la verificación del clon limpio, el control que debía fallar —cargar el
+  artefacto y compararlo con una probabilidad documentada alterada a propósito— imprimió
+  `match False` y, en la línea siguiente, `exit 0 (must be 1)`.
+- **Mecanismo:** el comando era `python check.py | tail -1; echo "exit $?"`. En bash, `$?` después
+  de una tubería es el código del **último** comando, `tail`, que terminó bien; el de Python, 1, se
+  perdió. Sin `set -o pipefail`, cualquier `comando | tail` informa éxito aunque el comando falle,
+  y un control que debía fallar se lee como "el instrumento no puede fallar", o al revés, una
+  corrida que falló se lee como verde.
+- **Cómo se detectó:** por la contradicción entre las dos líneas de la misma salida: `match False`
+  no puede salir con código 0 de un script que sale con 1 ante cualquier diferencia. Lo detectó la
+  corrida que debe fallar, no la que debe pasar.
+- **Corrección:** las dos corridas se repitieron redirigiendo la salida a un archivo, con `$?`
+  inmediatamente después de Python: la que debe fallar sale con 1 y la que debe pasar, con 0.
+  Donde hace falta la tubería, se lee `${PIPESTATUS[0]}`.
+- **Defensa:** nivel 3: está escrito aquí. Las verificaciones del turno que pasaban por `tail`
+  —la suite del clon, `uv sync`— leyeron `${PIPESTATUS[0]}`.
+- **Aprendizaje:** es `docs/METHODOLOGY.md`, sección 7.6, otra vez, en la capa del intérprete de
+  comandos: el instrumento reportaba la señal de otro proceso. Y la corrida que debe fallar no es
+  un trámite: fue la única que podía mostrarlo.
+- **Referencias:** ERR-009, por el arnés que leyó la ausencia de una señal como un resultado.
