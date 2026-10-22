@@ -19,9 +19,11 @@ from fraud_detection.monitoring.performance import (
     confusion,
     degradation_status,
     evaluate_rows,
+    lowering_cost,
     probability_below,
     probability_of_run,
     runs,
+    segment_table,
     spread,
     step_windows,
     window_numbers,
@@ -136,6 +138,60 @@ def test_window_table_evaluates_each_window_on_its_own_rows() -> None:
     assert table.loc[1, "model_recall"] == 1.0
     assert (table.loc[2, "model_recall"], table.loc[2, "model_precision"]) == (0.0, 0.0)
     assert table.loc[3, "model_false_positives"] == 1
+
+
+def test_segment_table_by_hand_keeps_the_undefined_as_nan() -> None:
+    segments = np.array(["B", "B", "A", "A", "C", "C"])
+    table = segment_table(segments, LABELS, SCORES, RULE, threshold=0.5)
+    assert table.index.tolist() == ["A", "B", "C"]
+    # B: frauds 0.9 and 0.5, both flagged; the rule flags only the first.
+    assert (table.loc["B", "model_precision"], table.loc["B", "model_recall"]) == (1.0, 1.0)
+    assert (table.loc["B", "rule_precision"], table.loc["B", "rule_recall"]) == (1.0, 0.5)
+    # A: the fraud at 0.1 is missed and the legitimate 0.6 is flagged; the rule flags nothing.
+    assert (table.loc["A", "model_precision"], table.loc["A", "model_recall"]) == (0.0, 0.0)
+    assert math.isnan(table.loc["A", "rule_precision"])
+    assert table.loc["A", "rule_recall"] == 0.0
+    # C: no fraud. The model's false positive makes its precision 0, and its recall is not
+    # perfect but undefined; the rule flags nothing there, so both of its rates are undefined.
+    assert table.loc["C", "model_false_positives"] == 1
+    assert table.loc["C", "model_precision"] == 0.0
+    assert math.isnan(table.loc["C", "model_recall"])
+    assert math.isnan(table.loc["C", "rule_precision"])
+    assert math.isnan(table.loc["C", "rule_recall"])
+    assert table["rows"].sum() == len(LABELS)
+    with pytest.raises(ValueError, match="differ in length"):
+        segment_table(segments[:5], LABELS, SCORES, RULE)
+
+
+def test_lowering_cost_by_hand() -> None:
+    # At 0.55 the model flags 0.9 (fraud) and 0.6 (legitimate); the frauds at 0.5 and 0.1 are
+    # missed. Down to 0.5: 0.5 (fraud) and 0.5 (legitimate) join. Down to 0.1: all six.
+    cost = lowering_cost(LABELS, SCORES, threshold=0.55)
+    assert cost["score"].tolist() == [0.5, 0.1]
+    assert cost["positives_gained"].tolist() == [1, 2]
+    assert cost["negatives_added"].tolist() == [1, 2]
+    assert cost["recall"].tolist() == pytest.approx([2 / 3, 1.0])
+    assert cost["precision"].tolist() == [0.5, 0.5]
+
+
+def test_lowering_cost_gains_tied_positives_together_and_can_be_empty() -> None:
+    # Nothing flagged at 0.5; the two frauds share 0.3, so one row gains both, with the
+    # legitimate 0.4 above them.
+    cost = lowering_cost(np.array([1, 1, 0]), np.array([0.3, 0.3, 0.4]), threshold=0.5)
+    assert cost[["positives_gained", "negatives_added"]].to_numpy().tolist() == [[2, 1]]
+    assert cost.loc[0, "precision"] == pytest.approx(2 / 3)
+    # Every fraud already flagged: no price to pay, and the columns are still there.
+    empty = lowering_cost(LABELS, SCORES, threshold=0.05)
+    assert empty.empty
+    assert empty.columns.tolist() == [
+        "score",
+        "positives_gained",
+        "negatives_added",
+        "recall",
+        "precision",
+    ]
+    with pytest.raises(ValueError, match="differ in shape"):
+        lowering_cost(LABELS[:5], SCORES)
 
 
 def test_spread_reads_only_the_complete_windows() -> None:

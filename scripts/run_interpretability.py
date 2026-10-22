@@ -23,7 +23,9 @@ Steps, in order (ADR 0011):
    quantile grid; then ``amount`` again over its whole range, on the geometric grid, with
    the largest raw value at which the model splits on it.
 5. **Local cases:** the operating threshold, the four cases of ``local_explain`` and their
-   waterfalls.
+   waterfalls. Then case b in context, with the counts notebook 03 also shows: every
+   reference row with case b's exact amount, and every row above the model's last split on
+   ``amount``, against the label, the rule and the model.
 6. **Registry:** the figures and tables of this run are attached to the run of
    ``fraud-detection-pipeline`` version 1, under ``interpretability/``, after checking that
    the version was registered from this artifact. Only against the tracking server in
@@ -46,6 +48,7 @@ matplotlib.use("Agg")  # Files only: no window opens, whatever the platform's de
 import matplotlib.pyplot as plt
 
 from fraud_detection.config import settings
+from fraud_detection.data import profiling
 from fraud_detection.data.schema import TARGET_COLUMN
 from fraud_detection.explain.global_explain import (
     EXPLANATION_NEGATIVE_ROWS,
@@ -79,6 +82,7 @@ from fraud_detection.explain.global_explain import (
     trees_splitting_on,
 )
 from fraud_detection.explain.local_explain import (
+    CASE_MODEL_ONLY,
     CASE_TITLES,
     display_values,
     operating_point,
@@ -397,6 +401,38 @@ def main() -> int:
         )
         _save(figure, f"waterfall_{case}.png", written)
     _to_csv(pd.DataFrame(rows), "cases.csv", written, index=False)
+
+    case_b = cases[CASE_MODEL_ONLY]
+    if case_b is not None:
+        amount = raw_rows[column]
+        value = sample_rows.loc[case_b, column]
+        print(f"\n--- case b in context: every reference row with {column} == {value:.2f}")
+        same = (amount == value).to_numpy()
+        larger_balance = (raw_rows["oldbalanceOrg"] > amount).to_numpy()
+        above_cut = (amount > thresholds[-1]).to_numpy()
+        rule, model_flags = rule_flags.to_numpy(), flagged.to_numpy()
+        label = reference[TARGET_COLUMN]
+        print(profiling.label_by_type(reference[same]).counts.to_string())
+        missed_by_rule = fraud & ~rule_flags
+        print(
+            f"frauds the rule misses with that {column}: "
+            f"{int((missed_by_rule & same).sum())} of {int(missed_by_rule.sum())} | largest "
+            f"{column} in reference {amount.max():.2f}"
+        )
+        print(f"{'':<58} {'rows':>7} {'fraud':>6} {'legit':>6} {'precision':>10}")
+        for name, mask in (
+            (f"{column} == {value:.2f}", same),
+            ("  and outside the rule", same & ~rule),
+            ("  and oldbalanceOrg larger than the amount", same & larger_balance),
+            ("  and flagged by the model", same & model_flags),
+            (f"{column} above the model's last split, {thresholds[-1]:.2f}", above_cut),
+            ("  and flagged by the model", above_cut & model_flags),
+        ):
+            outcome = profiling.rule_outcome(mask, label)
+            print(
+                f"{name:<58} {outcome.flagged_rows:>7} {outcome.true_positives:>6} "
+                f"{outcome.false_positives:>6} {outcome.precision:>10.6f}"
+            )
     return 0 if _attach_to_registry(written) else 1
 
 
