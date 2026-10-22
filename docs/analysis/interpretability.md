@@ -253,3 +253,9 @@ cada corrida y no son costos de referencia.
 - **El ICE de `amount`** no cubre la región de los 10.000.000, donde están 62 de los 92 fraudes
   que la regla no ve.
 - **Los 11 fraudes que la regla no cubre y el modelo tampoco marca** no se analizaron.
+
+---
+
+**Nota de estado (2026-10-21):** la generalización que esta medición no cubría se midió en la
+fase 4, con el mismo artefacto y el mismo umbral: sobre producción, recall 0,9976 y precisión
+0,9997 (`docs/analysis/monitoring.md`, EVAL-011). Las cifras de este documento no cambian.

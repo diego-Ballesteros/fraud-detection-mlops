@@ -133,10 +133,10 @@ El detalle está en [EVAL-001 a EVAL-004](docs/EVALUATION.md) y en el
 
 | Componente | Peso | Estado |
 |---|---|---|
-| Repositorio | 10% | Estructura, CI, pre-commit y los datos fuera de git: hecho. Notebook `01_preprocessing`: hecho. Notebooks 02, 03 y 04: pendientes. La carpeta `app/` existe, vacía |
-| Documentación | 10% | Diccionario de datos, once ADR, registros de evaluación y de errores, y este README: hecho para lo construido hasta ahora |
+| Repositorio | 10% | Estructura, CI, pre-commit y los datos fuera de git: hecho. Notebooks `01_preprocessing` y `04_monitoring`: hechos. Notebooks 02 y 03: pendientes. La carpeta `app/` existe, vacía |
+| Documentación | 10% | Diccionario de datos, doce ADR, registros de evaluación y de errores, y este README: hecho para lo construido hasta ahora |
 | Técnicas avanzadas de ML | 50% | Arnés de evaluación, baselines y registro en MLflow: hecho. Búsqueda de hiperparámetros: hecha, pero incompleta (8 de 150 ensayos, [EVAL-009](docs/EVALUATION.md)). Modelo elegido serializado y registrado en el Model Registry: hecho ([ADR 0010](docs/adr/0010-chosen-configuration.md)). Interpretabilidad local y global: medida sobre el artefacto ([análisis](docs/analysis/interpretability.md), [ADR 0011](docs/adr/0011-interpretability-design.md)); **falta el notebook 03** |
-| Monitoreo | 30% | **Sin empezar** |
+| Monitoreo | 30% | Desempeño por ventana, criterio de degradación y drift, medidos e interpretados sobre producción, y el reporte HTML de Evidently ([análisis](docs/analysis/monitoring.md), [ADR 0012](docs/adr/0012-monitoring-design.md), [EVAL-011](docs/EVALUATION.md)), y su narrativa en `notebooks/04_monitoring.ipynb` |
 | Reto ML 1: AutoML | +10% | Hecho sobre una búsqueda incompleta: el algoritmo es un hiperparámetro categórico entre regresión logística, Random Forest y LightGBM ([EVAL-009](docs/EVALUATION.md)) |
 | Reto ML 2: app web de monitoreo | +10% | Pendiente |
 
@@ -182,6 +182,14 @@ de referencia; escribe figuras y tablas en `reports/interpretability/`:
 
 ```bash
 uv run python scripts/run_interpretability.py # la compuerta de SHAP, lo global y lo local
+```
+
+El monitoreo lee los dos parquet y el artefacto, sin reajustar nada. Escribe sus tablas en
+`reports/monitoring/` y el reporte de Evidently en `reports/deliverables/`, y registra la corrida
+en MLflow como los demás:
+
+```bash
+uv run python scripts/run_monitoring.py       # producción por ventanas, drift y el HTML
 ```
 
 ---

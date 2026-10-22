@@ -11,6 +11,11 @@ repos:
       # data/ is gitignored, but a heavy artifact anywhere else would slip through.
       - id: check-added-large-files
         args: ["--maxkb=1024"]
+        # One file, not a higher global limit: the monitoring report is the declared
+        # deliverable of the 30% component (ADR 0012), and an evaluator who clones the repo
+        # cannot regenerate it without the CSV, which is not versioned. About 4 MB, nearly
+        # all of it Evidently's embedded JavaScript.
+        exclude: ^reports/deliverables/monitoring_report\.html$
 
   - repo: local
     hooks:
