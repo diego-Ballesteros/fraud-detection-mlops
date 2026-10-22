@@ -294,3 +294,23 @@ cierta y hay tres mediciones nuevas:
   `reports/interpretability/` a la corrida `e1fb3e9b12ed4dfc9a025a751eb9ff04`, la que registró
   `fraud-detection-pipeline` versión 1, bajo `interpretability/`, después de comprobar que la
   versión se registró con el sha256 de este artefacto.
+
+**Nota de estado (2026-10-21, fase 5):** las cuentas del caso b que la nota anterior daba como
+"las reproduce el notebook 03; el script no las calcula" las calcula ahora el script, al final del
+paso 5, con las mismas funciones (`profiling.rule_outcome` y `profiling.label_by_type`), así que
+este documento vuelve a cumplir su contrato: toda cifra suya la reproduce un script. Una cuarta
+corrida completa las reprodujo todas: 3.014 transacciones de referencia con `amount` igual al del
+caso b, 114 fraudes y 2.900 legítimas, todas `TRANSFER`; 57 de los 92 fraudes fuera de la regla con
+ese monto; el monto máximo de referencia, 92.445.516,64; el saldo de origen mayor que el monto en
+los 57 fraudes y en ninguna legítima; el modelo marca los 114 y ninguna de las 2.900; y por encima
+del último corte, 2.812.983,54, hay 22.844 transacciones, 658 fraudes, y el modelo marca 659: los
+658 y una legítima. Las cifras de las secciones 1 a 5 tampoco cambiaron; la permutación tardó
+542,7 s. Los 11 archivos volvieron a adjuntarse a la corrida `e1fb3e9b…`.
+
+**Diferido: `shap_beeswarm.png` no se reproduce byte a byte.** Medido en esta corrida: de los 11
+archivos de `reports/interpretability/`, 10 salieron idénticos a los de la corrida anterior y la
+figura del beeswarm no, aunque `mean_abs_shap.csv`, hecho con los mismos valores SHAP, sí. La
+hipótesis, leída en el código y no medida: `shap.plots.beeswarm` baraja el orden de dibujo de los
+puntos con el generador global de numpy cuando no recibe `rng` (shap 0.51.0), y
+`global_explain.plot_beeswarm` no se lo pasa, así que cambia qué punto queda encima de cuál. Ninguna
+cifra depende de la figura. No se corrigió: queda diferido.

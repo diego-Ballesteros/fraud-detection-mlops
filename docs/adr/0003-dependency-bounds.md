@@ -173,3 +173,11 @@ igual, porque shap carga scikit-learn antes que numba (medido con 0.50.0: módul
 quedó la versión 14.51.36247. Después, numba 0.57.0, numba 0.68.0 y lightgbm 4.7.0 importan
 solos. Para un tercero sin el Redistributable, la protección sigue siendo el orden de carga:
 la importación diferida de lightgbm, y shap, que trae scikit-learn primero.
+
+**Nota de estado (2026-10-21, fase 5):** dos afirmaciones escritas como previsión resultaron
+falsas. La tabla "Cotas aplicadas" dice que numba no está en el grafo "hasta que entre shap, en
+la fase 2": shap entró en la fase 3. Y la sección de numba dice que la constraint "queda puesta
+aunque hoy sea inerte: shap todavía no está en el grafo": desde la fase 3 shap trae numba al
+grafo y la constraint actúa (`docs/DEPENDENCIES.md`, restricciones sobre transitivas). La
+verificación en ejecución del piso de numba es la de la nota de estado de la fase 3. La
+decisión no cambia.

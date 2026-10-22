@@ -68,3 +68,14 @@ pero vacía las cuatro secciones de la rúbrica:
 - los hiperparámetros no se separan,
 - la interpretabilidad se vuelve trivial,
 - y el monitoreo no tiene nada que detectar.
+
+---
+
+**Nota de estado (2026-10-22, fase 5):** la ablación declarada aquí no se corrió en la fase 2 y
+se corrió en la de cierre, con dos diferencias respecto de lo declarado: **solo para LightGBM**,
+el modelo elegido, con los hiperparámetros del ensayo 5 (ADR 0010), y no una vez por familia; y
+además sobre producción, con un umbral propio elegido sobre referencia. Resultado (EVAL-013): sin
+la bandera ni `oldbalanceOrg`, ningún umbral alcanza precisión 0,99 en ningún fold, y el recall de
+decisión pasa de 0,9970 a 0. La consecuencia que este ADR anticipaba para la fase 2 —que el PR-AUC
+global está saturado por la firma— queda medida desde el otro lado: sin la firma, el mismo modelo
+da 0,074. La decisión no cambia.

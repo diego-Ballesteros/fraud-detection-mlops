@@ -240,7 +240,7 @@ Este dataset tiene una prevalencia de fraude muy baja. Un modelo que siempre pre
 ### 6.2 · Medir, no estimar
 
 *"SMOTE debería ayudar"* no es un resultado. Y cuando algo no se puede medir, decirlo: *"no
-puedo determinar si el modelo generaliza más allá del step 718 porque la simulación
+puedo determinar si el modelo generaliza más allá del step 743 porque la simulación
 termina ahí"* es infinitamente más útil que una conjetura presentada como hallazgo.
 
 ### 6.3 · Un solo pipeline, varios consumidores
@@ -278,6 +278,18 @@ Jerarquía, de más fuerte a más débil:
 clonar el repo en un directorio limpio, seguir **solo lo que dice el README**, y confirmar
 que las métricas coinciden. En el proyecto anterior ese ejercicio encontró una cifra
 documentada que ya no reproducía — no un fallo de instalación.
+
+### 6.7 · Toda métrica se reporta interpretada
+
+Regla del Verificador, escrita en la fase de cierre (2026-10-21):
+
+> Toda métrica se reporta interpretada. Ninguna figura se queda sin su párrafo de lectura — un
+> pie de figura no es una interpretación. Ninguna métrica aparece sin decir por qué esa y no
+> otra, y qué significaría que se moviera. Toda cifra lleva su consecuencia operativa cuando la
+> tenga: cuántos fraudes, cuántas alertas por día, qué cuesta el siguiente punto de recall. Y
+> donde una cifra no se puede interpretar, se dice cuál es el dato que falta.
+
+El contexto de una métrica —baseline, particiones, dispersión— lo pide la sección 7.3.
 
 ---
 

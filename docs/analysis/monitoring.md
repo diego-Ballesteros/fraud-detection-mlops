@@ -339,3 +339,75 @@ versiones anteriores del mismo script: sus cifras de desempeño, del criterio y 
 coinciden con las de este documento, y les faltan las métricas de contexto de la regla y las
 mediciones de lectura de la sección 4 (las legítimas solas, los saldos en cero, el nulo, el
 volumen y el perfil horario). La de registro es `b7eabc74ebc64ae68b05472ff437bb3f`.
+
+---
+
+**Nota de estado (2026-10-21, fase 5): el desempeño por tipo y el precio de los fraudes que el
+modelo pierde.** Dos mediciones nuevas, que el script calcula desde esta fase en su paso 3
+(`performance.segment_table` y `performance.lowering_cost`), sobre las mismas puntuaciones y el
+mismo umbral fijo. La corrida que las registra es `0a146ff55e604e328fb7d0d251b4eff5`. Reprodujo
+las cifras de este documento: las 11 tablas de `reports/monitoring/` salieron idénticas byte a byte
+a las de `b7eabc74…`. El HTML de Evidently cambió de bytes y no de contenido: comparado con el
+versionado, difiere solo en los identificadores y las marcas de tiempo que Evidently genera en cada
+corrida y en los espacios finales que el hook `trailing-whitespace` quita al commitear, así que la
+copia versionada no se reemplazó. Las cifras de las secciones 1 a 7 no cambian.
+
+**Por tipo de transacción, el modelo al umbral fijo y la regla, sobre las mismas filas:**
+
+| Tipo | Filas | Fraudes | Modelo marca | Falsos positivos | Fraudes perdidos | Modelo P | Modelo R | Regla P | Regla R |
+|---|---|---|---|---|---|---|---|---|---|
+| `CASH_IN` | 127.917 | 0 | 0 | 0 | — | indefinida | indefinido | indefinida | indefinido |
+| `CASH_OUT` | 189.404 | 1.868 | 1.861 | 1 | 8 | 0,9995 | 0,9957 | 1,000 | 0,9936 |
+| `DEBIT` | 4.316 | 0 | 0 | 0 | — | indefinida | indefinido | indefinida | indefinido |
+| `PAYMENT` | 202.484 | 0 | 0 | 0 | — | indefinida | indefinido | indefinida | indefinido |
+| `TRANSFER` | 51.469 | 1.868 | 1.867 | 0 | 1 | 1,000 | 0,9995 | 1,000 | 0,9513 |
+
+Sobre las 14 ventanas completas, en los dos tipos con fraude (media ± desviación estándar muestral,
+ddof = 1, y rango):
+
+| Tipo | Recall del modelo | Recall de la regla | Precisión del modelo |
+|---|---|---|---|
+| `CASH_OUT` | 0,9961 ± 0,0051 (0,984–1,000) | 0,9940 ± 0,0061 (0,984–1,000) | 0,9994 ± 0,0021 (0,9922–1,000) |
+| `TRANSFER` | 0,9995 ± 0,0020 (0,9925–1,000) | 0,9532 ± 0,0304 (0,904–1,000) | 1,0000 ± 0 |
+
+- **En tres tipos no hay nada que medir.** `CASH_IN`, `DEBIT` y `PAYMENT` son 334.717 filas, el 58%
+  de producción, sin un fraude, y ni el modelo ni la regla marcan ninguna. Su precisión y su recall
+  no son perfectos: no están definidos. Lo único que dicen es que ahí no hubo falsas alarmas.
+- **El valor del modelo sobre la regla está en `TRANSFER`.** Ahí la regla pierde 91 fraudes y el
+  modelo recupera 90: +0,0482 de recall, unas diez veces la significancia práctica. En `CASH_OUT` la
+  regla pierde 12 y el modelo recupera 4: +0,0021, por debajo de la significancia práctica, y
+  dentro de una desviación estándar entre días. En `CASH_OUT` el modelo y la regla son, en la
+  práctica, el mismo detector, y ahí cae la única legítima que el modelo marca.
+- **Los 9 fraudes que el modelo pierde:** 8 `CASH_OUT` y 1 `TRANSFER`, todos fuera de la regla. Por
+  qué el modelo no ve los `CASH_OUT` fuera de la firma no está medido.
+
+**El precio de los fraudes perdidos.** Para cada puntaje de un fraude que el modelo pierde, de mayor
+a menor, cuánto agregaría a la cola un umbral bajado hasta él, acumulado desde el umbral fijo. Se lee
+y no se aplica: elegir un umbral con esta curva sería ajustarlo con producción (ADR 0012).
+
+| Fraudes ganados | Legítimas agregadas, producción (14,29 días) | Por día | Precisión | Legítimas agregadas, referencia *in-sample* (16,67 días) | Precisión |
+|---|---|---|---|---|---|
+| 1 | 18 | 1,3 | 0,9949 | 6 | 0,9889 |
+| 2 | 26 | 1,8 | 0,9928 | 14 | 0,9872 |
+| 3 | 31 | 2,2 | 0,9915 | 15 | 0,9870 |
+| 4 | 31 | 2,2 | 0,9915 | 58 | 0,9777 |
+| 5 | 48 | 3,4 | 0,9870 | 95 | 0,9698 |
+| 6 | 103 | 7,2 | 0,9729 | 124 | 0,9638 |
+| 7 | 292 | 20,4 | 0,9272 | 143 | 0,9599 |
+| 8 | 314 | 22,0 | 0,9222 | 149 | 0,9586 |
+| 9 | 571.831 | 40.012 | 0,0065 | 159 | 0,9566 |
+| 10 | — | — | — | 654 | 0,8651 |
+| 11 | — | — | — | 1.514 | 0,7418 |
+
+- **En producción, los cuatro primeros fraudes cuestan 31 revisiones inútiles en dos semanas**, y la
+  precisión queda en 0,9915, sobre el piso. El cuarto sale gratis: entre su puntaje y el del tercero
+  no hay ninguna legítima. El quinto baja la precisión a 0,987, y del sexto en adelante cada fraude
+  cuesta decenas o cientos de revisiones.
+- **El último no se puede comprar.** Su puntaje es 0,0000015: el modelo está tan seguro de que es
+  legítimo como de casi cualquier legítima, y atraparlo exige mandar a revisión prácticamente todo
+  producción.
+- **El precio depende del volumen legítimo, no solo del modelo.** En referencia el primer fraude de
+  más ya rompe el piso de 0,99 —el umbral es, por construcción, el último punto que lo cumple—; en
+  producción hay margen para cuatro, porque hay 8,7 veces menos legítimas por step. Es la misma
+  aritmética que subió la precisión (sección 2), y por eso este margen no es un argumento para
+  bajar el umbral.

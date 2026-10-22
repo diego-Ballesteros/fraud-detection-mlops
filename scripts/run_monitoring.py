@@ -16,7 +16,10 @@ Steps, in order (ADR 0012):
 1. **Threshold check:** the decision metric's point on the reference scores must be the
    constant; otherwise the script stops with exit code 1.
 2. **The rule on production,** before any number of the model.
-3. **Performance by window and aggregate:** the model at the fixed threshold beside the rule.
+3. **Performance by window and aggregate:** the model at the fixed threshold beside the rule;
+   then by transaction type, with the spread over the windows of the types that have fraud;
+   then the price of the next frauds, on production and on reference (in-sample): what
+   lowering the threshold to each missed fraud would add to the queue. Read, never applied.
 4. **The degradation criterion,** with its false-alarm probability under the null at the
    window sizes production actually had.
 5. **Drift:** of the target (prevalence) and of the 11 features, PSI and KS, over the whole
@@ -80,9 +83,11 @@ from fraud_detection.monitoring.performance import (
     below_line,
     degradation_status,
     evaluate_rows,
+    lowering_cost,
     probability_below,
     probability_of_run,
     runs,
+    segment_table,
     spread,
     step_windows,
     window_numbers,
@@ -148,6 +153,22 @@ SPREAD_COLUMNS: Final[tuple[str, ...]] = (
     "rule_brier",
     "brier",
 )
+SEGMENT_COLUMNS: Final[tuple[str, ...]] = (
+    "rows",
+    "positives",
+    "prevalence",
+    "model_flagged",
+    "model_true_positives",
+    "model_false_positives",
+    "model_false_negatives",
+    "model_precision",
+    "model_recall",
+    "rule_flagged",
+    "rule_false_negatives",
+    "rule_precision",
+    "rule_recall",
+)
+SEGMENT_SPREAD_COLUMNS: Final[tuple[str, ...]] = ("model_precision", "model_recall", "rule_recall")
 
 
 @contextmanager
@@ -262,6 +283,49 @@ def main() -> int:
     summary = spread(table, SPREAD_COLUMNS)
     print("\nspread over the complete windows (sample std, ddof = 1):")
     print(summary.to_string(float_format=lambda value: f"{value:.6f}"))
+
+    types = production_rows["type"].astype(str).to_numpy()
+    segments = segment_table(types, labels, scores, rule_flags)
+    print("\nby transaction type, the model and the rule on the same rows (NaN: undefined):")
+    print(_fmt(segments[list(SEGMENT_COLUMNS)]))
+    fraud_types = segments.index[segments["positives"] > 0].tolist()
+    print(
+        f"types with fraud: {fraud_types}; without: "
+        f"{segments.index.difference(fraud_types).tolist()}"
+    )
+    type_spread = pd.concat(
+        {
+            name: spread(
+                window_table(
+                    steps[types == name],
+                    labels[types == name],
+                    scores[types == name],
+                    rule_flags[types == name],
+                    windows,
+                ),
+                SEGMENT_SPREAD_COLUMNS,
+            )
+            for name in fraud_types
+        }
+    )
+    print("spread over the complete windows, types with fraud (sample std, ddof = 1):")
+    print(type_spread.to_string(float_format=lambda value: f"{value:.6f}"))
+
+    print("\nthe price of the next frauds: the threshold lowered to each missed fraud's score")
+    print("(cumulative from the fixed threshold; read, never applied)")
+    costs = {}
+    for name, period_labels, period_scores, period_steps in (
+        ("production", labels, scores, steps),
+        ("reference_in_sample", reference_labels, reference_scores, reference_rows[STEP_COLUMN]),
+    ):
+        days = np.unique(period_steps).size / WINDOW_STEPS
+        costs[name] = lowering_cost(period_labels, period_scores)
+        costs[name]["negatives_added_per_day"] = costs[name]["negatives_added"] / days
+        print(f"{name}: {days:.2f} simulated days")
+        print(costs[name].to_string(float_format=lambda value: f"{value:.6g}"))
+    missed = fraud & ~model_flags
+    print("frauds the model misses on production, by type and rule:")
+    print(pd.crosstab(types[missed], rule[missed], rownames=["type"], colnames=["rule"]))
 
     print("\n=== 4. DEGRADATION CRITERION (declared before measuring, ADR 0012)")
     complete = table.loc[table["complete"].astype(bool)]
@@ -417,6 +481,10 @@ def main() -> int:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     table.to_csv(OUTPUT_DIR / "windows.csv")
     summary.to_csv(OUTPUT_DIR / "windows_spread.csv")
+    segments.to_csv(OUTPUT_DIR / "segments.csv")
+    type_spread.to_csv(OUTPUT_DIR / "segments_window_spread.csv")
+    for name, cost in costs.items():
+        cost.to_csv(OUTPUT_DIR / f"lowering_cost_{name}.csv", index=False)
     whole.to_csv(OUTPUT_DIR / "drift_features.csv")
     window_psi.to_csv(OUTPUT_DIR / "drift_windows_psi.csv")
     window_ks.to_csv(OUTPUT_DIR / "drift_windows_ks.csv")
@@ -497,6 +565,12 @@ def main() -> int:
                 **{f"ks_{name}": value for name, value in whole["ks"].items()},
                 **{f"spread_{name}_mean": value for name, value in summary["mean"].items()},
                 **{f"spread_{name}_std": value for name, value in summary["std"].items()},
+                **{
+                    f"segment_{segment}_{name}": float(value)
+                    for segment, row in segments[list(SEGMENT_COLUMNS)].iterrows()
+                    for name, value in row.items()
+                    if pd.notna(value)
+                },
             }
         )
         for number in table.index:
